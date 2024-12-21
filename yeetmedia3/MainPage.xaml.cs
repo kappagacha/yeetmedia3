@@ -1,10 +1,11 @@
-﻿using yeetmedia3.Services;
+﻿using Microsoft.Extensions.Configuration;
+using yeetmedia3.Services;
 
 namespace yeetmedia3;
 
 public partial class MainPage : ContentPage
 {
-    readonly GoogleDriveService _googleDriveService = new();
+    readonly GoogleDriveService _googleDriveService = new(IPlatformApplication.Current!.Services.GetService<IConfiguration>()!);
     public MainPage()
     {
         InitializeComponent();

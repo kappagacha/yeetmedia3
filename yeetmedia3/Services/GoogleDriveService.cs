@@ -2,6 +2,7 @@
 using Google.Apis.Drive.v3;
 using Google.Apis.Oauth2.v2;
 using Google.Apis.Services;
+using Microsoft.Extensions.Configuration;
 using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
@@ -12,8 +13,15 @@ namespace yeetmedia3.Services;
 
 public class GoogleDriveService
 {
-    readonly string _windowsClientId = "__UWP_CLIENT_ID_HERE__";      // UWP client
-    readonly string _androidClientId = "__ANDROID_CLIENT_ID_HERE__";  // Android client
+    readonly string _uwpClientId;
+    readonly string _androidClientId;
+    readonly string _androidRedirectScheme = AppInfo.Current.PackageName;
+
+    public GoogleDriveService(IConfiguration config)
+    {
+        _uwpClientId = config["googleOAuth:uwpClientId"] ?? throw new Exception("googleOAuth:uwpClientId configuration required");
+        _androidClientId = config["googleOAuth:androidClientId"] ?? throw new Exception("googleOAuth:androidClientId configuration required");
+    }
 
     Oauth2Service? _oauth2Service;
     DriveService? _driveService;
@@ -66,12 +74,12 @@ public class GoogleDriveService
         _oauth2Service = new Oauth2Service(new BaseClientService.Initializer
         {
             HttpClientInitializer = _credential,
-            ApplicationName = "yeetmedia3"
+            ApplicationName = AppInfo.Current.Name
         });
         _driveService = new DriveService(new BaseClientService.Initializer
         {
             HttpClientInitializer = _credential,
-            ApplicationName = "yeetmedia3"
+            ApplicationName = AppInfo.Current.Name
         });
         var userInfo = await _oauth2Service.Userinfo.Get().ExecuteAsync();
         _email = userInfo.Email;
@@ -107,7 +115,7 @@ public class GoogleDriveService
     private async Task DoAuthCodeFlowWindows()
     {
         var authUrl = "https://accounts.google.com/o/oauth2/v2/auth";
-        var clientId = _windowsClientId;
+        var clientId = _uwpClientId;
         var localPort = 12345;
         var redirectUri = $"http://localhost:{localPort}";
         var codeVerifier = GenerateCodeVerifier();
@@ -126,14 +134,14 @@ public class GoogleDriveService
     {
         var authUrl = "https://accounts.google.com/o/oauth2/v2/auth";
         var clientId = _androidClientId;
-        var redirectUri = "com.companyname.yeetmedia3://";  // requires a period: https://developers.google.com/identity/protocols/oauth2/native-app#android
+        var redirectUri = $"{_androidRedirectScheme}://";  // requires a period: https://developers.google.com/identity/protocols/oauth2/native-app#android
         var codeVerifier = GenerateCodeVerifier();
         var codeChallenge = GenerateCodeChallenge(codeVerifier);
         var parameters = GenerateAuthParameters(redirectUri, clientId, codeChallenge);
         var queryString = string.Join("&", parameters.Select(param => $"{param.Key}={param.Value}"));
         var fullAuthUrl = $"{authUrl}?{queryString}";
 #pragma warning disable CA1416
-        var authCodeResponse = await WebAuthenticator.AuthenticateAsync(new Uri(fullAuthUrl), new Uri("com.companyname.yeetmedia3://"));
+        var authCodeResponse = await WebAuthenticator.AuthenticateAsync(new Uri(fullAuthUrl), new Uri(redirectUri));
 #pragma warning restore CA1416
         var authorizationCode = authCodeResponse.Properties["code"];
 
@@ -191,7 +199,7 @@ public class GoogleDriveService
 
     private async Task RefreshToken()
     {
-        var clientId = DeviceInfo.Current.Platform == DevicePlatform.WinUI ? _windowsClientId : _androidClientId;
+        var clientId = DeviceInfo.Current.Platform == DevicePlatform.WinUI ? _uwpClientId : _androidClientId;
         var tokenEndpoint = "https://oauth2.googleapis.com/token";
         var refreshToken = await SecureStorage.GetAsync("refresh_token");
         var client = new HttpClient();
