@@ -1,53 +1,24 @@
-﻿using Microsoft.Extensions.Configuration;
-using yeetmedia3.Services;
-
-namespace yeetmedia3;
-
-public partial class MainPage : ContentPage
+﻿namespace yeetmedia3
 {
-    readonly GoogleDriveService _googleDriveService = new(IPlatformApplication.Current!.Services.GetService<IConfiguration>()!);
-    public MainPage()
+    public partial class MainPage : ContentPage
     {
-        InitializeComponent();
-    }
+        int count = 0;
 
-    private async void ContentPage_Loaded(object sender, EventArgs e)
-    {
-        await _googleDriveService.Init();
-        UpdateButton();
-    }
-
-    private async void SignIn_Clicked(object sender, EventArgs e)
-    {
-        if (SignInButton.Text == "Sign In")
+        public MainPage()
         {
-            await _googleDriveService.SignIn();
+            InitializeComponent();
         }
-        else
-        {
-            await _googleDriveService.SignOut();
 
-        }
-        UpdateButton();
-    }
-
-    private async void List_Clicked(object sender, EventArgs e)
-    {
-        ListLabel.Text = await _googleDriveService.ListFiles();
-    }
-
-    private void UpdateButton()
-    {
-        if (_googleDriveService.IsSignedIn)
+        private void OnCounterClicked(object? sender, EventArgs e)
         {
-            SignInButton.Text = $"Sign Out ({_googleDriveService.Email})";
-            ListButton.IsVisible = true;
-        }
-        else
-        {
-            SignInButton.Text = "Sign In";
-            ListButton.IsVisible = false;
-            ListLabel.Text = String.Empty;
+            count++;
+
+            if (count == 1)
+                CounterBtn.Text = $"Clicked {count} time";
+            else
+                CounterBtn.Text = $"Clicked {count} times";
+
+            SemanticScreenReader.Announce(CounterBtn.Text);
         }
     }
 }

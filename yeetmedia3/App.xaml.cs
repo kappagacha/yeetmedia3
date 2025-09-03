@@ -1,27 +1,15 @@
-﻿namespace yeetmedia3;
-
-public partial class App : Application
+﻿namespace yeetmedia3
 {
-    public App()
+    public partial class App : Application
     {
-
-        InitializeComponent();
-    }
-
-    protected override Window CreateWindow(IActivationState? activationState)
-    {
-        var displayInfo = DeviceDisplay.Current.MainDisplayInfo;
-        var width = 700;
-        var height = 500;
-        var centerX = (displayInfo.Width / displayInfo.Density - width) / 2;
-        var centerY = (displayInfo.Height / displayInfo.Density - height) / 2;
-
-        return new Window(new AppShell())
+        public App()
         {
-            Width = width,
-            Height = height,
-            X = centerX,
-            Y = centerY
-        };
+            InitializeComponent();
+        }
+
+        protected override Window CreateWindow(IActivationState? activationState)
+        {
+            return new Window(new AppShell());
+        }
     }
 }
