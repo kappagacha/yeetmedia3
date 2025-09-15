@@ -1,0 +1,231 @@
+using Google.Apis.Auth.OAuth2;
+using Google.Apis.Drive.v3;
+using Google.Apis.Services;
+using Google.Apis.Util.Store;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Maui.Storage;
+using Microsoft.Extensions.Configuration;
+using System.Reflection;
+using Yeetmedia3.Models;
+using System.Text.Json;
+
+namespace Yeetmedia3.Services;
+    public class GoogleDriveService
+    {
+        private static readonly string[] Scopes = { DriveService.Scope.DriveReadonly };
+        private readonly AppSettings _appSettings;
+        private DriveService _driveService;
+
+        public GoogleDriveService()
+        {
+            _appSettings = LoadAppSettings();
+        }
+
+        private AppSettings LoadAppSettings()
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var resourceName = "Yeetmedia3.appsettings.json";
+
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream == null)
+            {
+                throw new FileNotFoundException($"Embedded resource {resourceName} not found.");
+            }
+
+            using var reader = new StreamReader(stream);
+            var json = reader.ReadToEnd();
+            return JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+
+        public async Task InitializeAsync()
+        {
+#if ANDROID
+            await InitializeAndroidAsync();
+#elif WINDOWS
+            await InitializeWindowsAsync();
+#else
+            throw new PlatformNotSupportedException("Google Drive authentication is not supported on this platform");
+#endif
+        }
+
+#if ANDROID
+        private async Task InitializeAndroidAsync()
+        {
+            // Android uses OAuth 2.0 with installed app flow
+            var clientSecrets = new ClientSecrets
+            {
+                ClientId = _appSettings.GoogleDrive.AndroidClientId
+                // No client secret needed for Android/mobile apps
+            };
+
+            var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                clientSecrets,
+                Scopes,
+                "user",
+                CancellationToken.None,
+                new FileDataStore(Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store")));
+
+            _driveService = new DriveService(new BaseClientService.Initializer()
+            {
+                HttpClientInitializer = credential,
+                ApplicationName = _appSettings.GoogleDrive.ApplicationName,
+            });
+        }
+#endif
+
+#if WINDOWS
+        private async Task InitializeWindowsAsync()
+        {
+            // Windows desktop app uses OAuth 2.0 for installed applications (no secret required)
+            var clientSecrets = new ClientSecrets
+            {
+                ClientId = _appSettings.GoogleDrive.WindowsClientId
+                // No client secret needed for desktop installed applications
+            };
+
+            var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                clientSecrets,
+                Scopes,
+                "user",
+                CancellationToken.None,
+                new FileDataStore(Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store")));
+
+            _driveService = new DriveService(new BaseClientService.Initializer()
+            {
+                HttpClientInitializer = credential,
+                ApplicationName = _appSettings.GoogleDrive.ApplicationName,
+            });
+        }
+#endif
+
+        public async Task<IList<Google.Apis.Drive.v3.Data.File>> ListFilesAsync(int pageSize = 10, string query = null)
+        {
+            if (_driveService == null)
+            {
+                await InitializeAsync();
+            }
+
+            var listRequest = _driveService.Files.List();
+            listRequest.PageSize = pageSize;
+            listRequest.Fields = "nextPageToken, files(id, name, mimeType, size, modifiedTime, parents, webViewLink)";
+
+            if (!string.IsNullOrEmpty(query))
+            {
+                listRequest.Q = query;
+            }
+
+            var files = await listRequest.ExecuteAsync();
+            return files.Files;
+        }
+
+        public async Task<IList<Google.Apis.Drive.v3.Data.File>> ListFoldersAsync()
+        {
+            return await ListFilesAsync(query: "mimeType='application/vnd.google-apps.folder'");
+        }
+
+        public async Task<IList<Google.Apis.Drive.v3.Data.File>> ListFilesInFolderAsync(string folderId)
+        {
+            return await ListFilesAsync(query: $"'{folderId}' in parents");
+        }
+
+        public async Task<Google.Apis.Drive.v3.Data.File> GetFileMetadataAsync(string fileId)
+        {
+            if (_driveService == null)
+            {
+                await InitializeAsync();
+            }
+
+            var request = _driveService.Files.Get(fileId);
+            request.Fields = "id, name, mimeType, size, modifiedTime, parents, webViewLink, description";
+
+            return await request.ExecuteAsync();
+        }
+
+        public async Task<Stream> DownloadFileAsync(string fileId)
+        {
+            if (_driveService == null)
+            {
+                await InitializeAsync();
+            }
+
+            var request = _driveService.Files.Get(fileId);
+            var stream = new MemoryStream();
+
+            request.MediaDownloader.ProgressChanged += (progress) =>
+            {
+                switch (progress.Status)
+                {
+                    case Google.Apis.Download.DownloadStatus.Downloading:
+                        Console.WriteLine($"Downloaded {progress.BytesDownloaded} bytes");
+                        break;
+                    case Google.Apis.Download.DownloadStatus.Completed:
+                        Console.WriteLine("Download complete.");
+                        break;
+                    case Google.Apis.Download.DownloadStatus.Failed:
+                        Console.WriteLine("Download failed.");
+                        break;
+                }
+            };
+
+            await request.DownloadAsync(stream);
+            stream.Position = 0;
+            return stream;
+        }
+
+        public async Task<IList<Google.Apis.Drive.v3.Data.File>> SearchFilesAsync(string searchTerm)
+        {
+            var query = $"name contains '{searchTerm}'";
+            return await ListFilesAsync(pageSize: 50, query: query);
+        }
+
+        public async Task<bool> IsAuthenticatedAsync()
+        {
+            try
+            {
+                if (_driveService == null)
+                {
+                    return false;
+                }
+
+                // Try to list one file to check if authenticated
+                var listRequest = _driveService.Files.List();
+                listRequest.PageSize = 1;
+                await listRequest.ExecuteAsync();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task SignOutAsync()
+        {
+            _driveService = null;
+
+            // Clear stored tokens
+            var tokenPath = Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store");
+            if (Directory.Exists(tokenPath))
+            {
+                Directory.Delete(tokenPath, true);
+            }
+        }
+
+        public string GetClientId()
+        {
+#if ANDROID
+            return _appSettings.GoogleDrive.AndroidClientId;
+#elif WINDOWS
+            return _appSettings.GoogleDrive.WindowsClientId;
+#else
+            return string.Empty;
+#endif
+        }
+    }

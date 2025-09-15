@@ -1,10 +1,14 @@
-﻿namespace yeetmedia3
+﻿using Yeetmedia3.Views;
+
+namespace Yeetmedia3;
+
+public partial class AppShell : Shell
 {
-    public partial class AppShell : Shell
+    public AppShell()
     {
-        public AppShell()
-        {
-            InitializeComponent();
-        }
+        InitializeComponent();
+
+        // Register routes for navigation
+        Routing.RegisterRoute(nameof(GoogleDriveView), typeof(GoogleDriveView));
     }
 }
