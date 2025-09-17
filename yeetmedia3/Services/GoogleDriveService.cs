@@ -19,6 +19,7 @@ namespace Yeetmedia3.Services;
         private static readonly string[] Scopes = { DriveService.Scope.DriveReadonly };
         private readonly AppSettings _appSettings;
         private DriveService _driveService;
+        private GoogleAuthService _authService;
 
         public GoogleDriveService()
         {
@@ -58,19 +59,21 @@ namespace Yeetmedia3.Services;
 #if ANDROID
         private async Task InitializeAndroidAsync()
         {
-            // Android uses OAuth 2.0 with installed app flow
-            var clientSecrets = new ClientSecrets
-            {
-                ClientId = _appSettings.GoogleDrive.AndroidClientId
-                // No client secret needed for Android/mobile apps
-            };
+            // Use the new GoogleAuthService for Android
+            _authService = new GoogleAuthService(
+                _appSettings.GoogleDrive.AndroidClientId,
+                null,
+                Scopes);
 
-            var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
-                clientSecrets,
-                Scopes,
-                "user",
-                CancellationToken.None,
-                new FileDataStore(Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store")));
+            var token = await _authService.GetValidTokenAsync();
+
+            if (token == null || string.IsNullOrEmpty(token.AccessToken))
+            {
+                token = await _authService.AuthenticateAsync();
+            }
+
+            // Create credential from token
+            var credential = GoogleCredential.FromAccessToken(token.AccessToken);
 
             _driveService = new DriveService(new BaseClientService.Initializer()
             {
@@ -189,6 +192,13 @@ namespace Yeetmedia3.Services;
         {
             try
             {
+#if ANDROID
+                // For Android, check if we have a valid token
+                if (_authService != null)
+                {
+                    return await _authService.IsAuthenticatedAsync();
+                }
+#endif
                 if (_driveService == null)
                 {
                     return false;
@@ -208,6 +218,12 @@ namespace Yeetmedia3.Services;
 
         public async Task SignOutAsync()
         {
+#if ANDROID
+            if (_authService != null)
+            {
+                await _authService.SignOutAsync();
+            }
+#endif
             _driveService = null;
 
             // Clear stored tokens
