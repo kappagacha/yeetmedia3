@@ -15,6 +15,9 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
     private string _errorMessage;
     private ObservableCollection<DriveFile> _files;
     private DriveFile _selectedFile;
+    private string _currentFolderId = "root";
+    private string _currentFolderName = "My Drive";
+    private Stack<(string Id, string Name)> _navigationStack = new Stack<(string, string)>();
 
     public GoogleDriveViewModel()
     {
@@ -28,6 +31,8 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         LoadFilesInFolderCommand = new Command<string>(async (folderId) => await LoadFilesInFolderAsync(folderId), (folderId) => IsAuthenticated && !string.IsNullOrEmpty(folderId));
         SearchFilesCommand = new Command<string>(async (searchTerm) => await SearchFilesAsync(searchTerm), (searchTerm) => IsAuthenticated && !string.IsNullOrEmpty(searchTerm));
         DownloadFileCommand = new Command<DriveFile>(async (file) => await DownloadFileAsync(file), (file) => IsAuthenticated && file != null);
+        OpenItemCommand = new Command<DriveFile>(async (file) => await OpenItemAsync(file), (file) => IsAuthenticated && file != null);
+        GoBackCommand = new Command(async () => await GoBackAsync(), () => CanGoBack);
         SignOutCommand = new Command(async () => await SignOutAsync(), () => IsAuthenticated);
     }
 
@@ -84,6 +89,19 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         }
     }
 
+    public string CurrentFolderName
+    {
+        get => _currentFolderName;
+        set
+        {
+            _currentFolderName = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CanGoBack));
+        }
+    }
+
+    public bool CanGoBack => _navigationStack.Count > 0;
+
     public ICommand AuthenticateCommand { get; }
     public ICommand RefreshFilesCommand { get; }
     public ICommand LoadFoldersCommand { get; }
@@ -91,6 +109,8 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
     public ICommand SearchFilesCommand { get; }
     public ICommand DownloadFileCommand { get; }
     public ICommand SignOutCommand { get; }
+    public ICommand OpenItemCommand { get; }
+    public ICommand GoBackCommand { get; }
 
     private async Task AuthenticateAsync()
     {
@@ -125,7 +145,11 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
             IsLoading = true;
             ErrorMessage = string.Empty;
 
-            var files = await _googleDriveService.ListFilesAsync(pageSize: 50);
+            // List files and folders in current folder
+            var query = $"'{_currentFolderId}' in parents and trashed = false";
+            var files = await _googleDriveService.ListFilesAsync(
+                pageSize: 50,
+                query: query);
             Files.Clear();
             foreach (var file in files)
             {
@@ -252,10 +276,55 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
             Files.Clear();
             SelectedFile = null;
             ErrorMessage = string.Empty;
+            _currentFolderId = "root";
+            _currentFolderName = "My Drive";
+            _navigationStack.Clear();
         }
         catch (Exception ex)
         {
             ErrorMessage = $"Sign out failed: {ex.Message}";
+        }
+    }
+
+    private async Task OpenItemAsync(DriveFile file)
+    {
+        if (file == null) return;
+
+        // Check if it's a folder
+        if (file.MimeType == "application/vnd.google-apps.folder")
+        {
+            // Save current folder to navigation stack
+            _navigationStack.Push((_currentFolderId, _currentFolderName));
+
+            // Navigate to the folder
+            _currentFolderId = file.Id;
+            CurrentFolderName = file.Name;
+
+            // Refresh files for the new folder
+            await RefreshFilesAsync();
+
+            // Update GoBack command state
+            ((Command)GoBackCommand).ChangeCanExecute();
+        }
+        else
+        {
+            // For files, you could implement preview or download
+            await DownloadFileAsync(file);
+        }
+    }
+
+    private async Task GoBackAsync()
+    {
+        if (_navigationStack.Count > 0)
+        {
+            var (parentId, parentName) = _navigationStack.Pop();
+            _currentFolderId = parentId;
+            CurrentFolderName = parentName;
+
+            await RefreshFilesAsync();
+
+            // Update GoBack command state
+            ((Command)GoBackCommand).ChangeCanExecute();
         }
     }
 
