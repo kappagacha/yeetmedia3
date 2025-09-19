@@ -34,6 +34,10 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         OpenItemCommand = new Command<DriveFile>(async (file) => await OpenItemAsync(file), (file) => IsAuthenticated && file != null);
         GoBackCommand = new Command(async () => await GoBackAsync(), () => CanGoBack);
         SignOutCommand = new Command(async () => await SignOutAsync(), () => IsAuthenticated);
+
+        // Initialize JSON commands
+        NewJsonFileCommand = new Command(async () => await NewJsonFileAsync());
+        EditJsonFileCommand = new Command<DriveFile>(async (file) => await EditJsonFileAsync(file));
     }
 
     public bool IsLoading
@@ -111,6 +115,8 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
     public ICommand SignOutCommand { get; }
     public ICommand OpenItemCommand { get; }
     public ICommand GoBackCommand { get; }
+    public ICommand NewJsonFileCommand { get; }
+    public ICommand EditJsonFileCommand { get; }
 
     private async Task AuthenticateAsync()
     {
@@ -326,6 +332,41 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
             // Update GoBack command state
             ((Command)GoBackCommand).ChangeCanExecute();
         }
+    }
+
+    private async Task NewJsonFileAsync()
+    {
+        try
+        {
+            var navigationParameter = new Dictionary<string, object>
+            {
+                { "currentFolderId", _currentFolderId },
+                { "isNewFile", true }
+            };
+
+            await Shell.Current.GoToAsync(nameof(Views.JsonEditorView), navigationParameter);
+        }
+        catch (Exception ex)
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", $"Failed to open JSON editor: {ex.Message}", "OK");
+        }
+    }
+
+    private async Task EditJsonFileAsync(DriveFile file)
+    {
+        if (file == null || !file.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            await Application.Current.MainPage.DisplayAlert("Error", "Please select a JSON file to edit", "OK");
+            return;
+        }
+
+        var navigationParameter = new Dictionary<string, object>
+        {
+            { "currentFolderId", _currentFolderId },
+            { "fileToEdit", file },
+            { "isNewFile", false }
+        };
+        await Shell.Current.GoToAsync(nameof(Views.JsonEditorView), navigationParameter);
     }
 
     public event PropertyChangedEventHandler PropertyChanged;

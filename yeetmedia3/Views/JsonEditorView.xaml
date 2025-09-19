@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Yeetmedia3.Views.JsonEditorView"
+             Title="JSON Editor">
+
+    <Grid RowDefinitions="Auto,*,Auto" Padding="10">
+
+        <!-- Top Bar with file name and actions -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="5" Margin="0,0,0,10">
+            <Entry x:Name="FileNameEntry"
+                   Grid.Column="0"
+                   Placeholder="Enter file name (e.g., data.json)"
+                   Text="{Binding FileName}"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#2A2A2A}"/>
+
+            <Button Grid.Column="1"
+                    Text="Validate"
+                    Command="{Binding ValidateJsonCommand}"
+                    BackgroundColor="#FFC107"
+                    TextColor="Black"
+                    Padding="10,5"/>
+
+            <Button Grid.Column="2"
+                    Text="Format"
+                    Command="{Binding FormatJsonCommand}"
+                    BackgroundColor="#17A2B8"
+                    TextColor="White"
+                    Padding="10,5"/>
+
+            <Button Grid.Column="3"
+                    Text="Save to Drive"
+                    Command="{Binding SaveToDriveCommand}"
+                    BackgroundColor="#28A745"
+                    TextColor="White"
+                    Padding="10,5"/>
+        </Grid>
+
+        <!-- JSON Editor -->
+        <Editor Grid.Row="1"
+                Text="{Binding JsonContent}"
+                Placeholder="Enter or paste your JSON here..."
+                FontFamily="Consolas,Monaco,Courier New"
+                FontSize="14"
+                BackgroundColor="{AppThemeBinding Light=#F8F9FA, Dark=#1E1E1E}"
+                TextColor="{AppThemeBinding Light=#212529, Dark=#D4D4D4}"
+                VerticalOptions="FillAndExpand"
+                HorizontalOptions="FillAndExpand"
+                IsSpellCheckEnabled="False"
+                Keyboard="Default"/>
+
+        <!-- Status Bar -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+            <Label Grid.Column="0"
+                   Text="{Binding StatusMessage}"
+                   TextColor="{Binding StatusColor}"
+                   VerticalOptions="Center"/>
+
+            <HorizontalStackLayout Grid.Column="1" Spacing="10">
+                <Label Text="{Binding LineCount, StringFormat='Lines: {0}'}"
+                       TextColor="Gray"
+                       VerticalOptions="Center"/>
+                <Label Text="{Binding CharCount, StringFormat='Chars: {0}'}"
+                       TextColor="Gray"
+                       VerticalOptions="Center"/>
+            </HorizontalStackLayout>
+        </Grid>
+
+    </Grid>
+
+</ContentPage>

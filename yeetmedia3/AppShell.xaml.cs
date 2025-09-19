@@ -10,5 +10,6 @@ public partial class AppShell : Shell
 
         // Register routes for navigation
         Routing.RegisterRoute(nameof(GoogleDriveView), typeof(GoogleDriveView));
+        Routing.RegisterRoute(nameof(JsonEditorView), typeof(JsonEditorView));
     }
 }

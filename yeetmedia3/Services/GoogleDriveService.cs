@@ -16,7 +16,7 @@ using System.Text.Json;
 namespace Yeetmedia3.Services;
     public class GoogleDriveService
     {
-        private static readonly string[] Scopes = { DriveService.Scope.DriveReadonly };
+        private static readonly string[] Scopes = { DriveService.Scope.Drive };
         private readonly AppSettings _appSettings;
         private DriveService _driveService;
         private GoogleAuthService _authService;
@@ -213,6 +213,61 @@ namespace Yeetmedia3.Services;
             catch
             {
                 return false;
+            }
+        }
+
+        public async Task<string> UploadFileAsync(string fileName, Stream fileContent, string mimeType, string parentFolderId = null)
+        {
+            if (_driveService == null)
+            {
+                await InitializeAsync();
+            }
+
+            var fileMetadata = new Google.Apis.Drive.v3.Data.File()
+            {
+                Name = fileName,
+                MimeType = mimeType
+            };
+
+            if (!string.IsNullOrEmpty(parentFolderId))
+            {
+                fileMetadata.Parents = new List<string> { parentFolderId };
+            }
+            else
+            {
+                fileMetadata.Parents = new List<string> { "root" };
+            }
+
+            FilesResource.CreateMediaUpload request;
+            request = _driveService.Files.Create(fileMetadata, fileContent, mimeType);
+            request.Fields = "id, name, mimeType, size, modifiedTime, parents, webViewLink";
+
+            var result = await request.UploadAsync();
+            if (result.Status == Google.Apis.Upload.UploadStatus.Failed)
+            {
+                throw new Exception($"Upload failed: {result.Exception?.Message}");
+            }
+
+            return request.ResponseBody?.Id;
+        }
+
+        public async Task UpdateFileAsync(string fileId, Stream fileContent, string mimeType)
+        {
+            if (_driveService == null)
+            {
+                await InitializeAsync();
+            }
+
+            var fileMetadata = new Google.Apis.Drive.v3.Data.File();
+
+            FilesResource.UpdateMediaUpload request;
+            request = _driveService.Files.Update(fileMetadata, fileId, fileContent, mimeType);
+            request.Fields = "id, name, mimeType, size, modifiedTime, parents, webViewLink";
+
+            var result = await request.UploadAsync();
+            if (result.Status == Google.Apis.Upload.UploadStatus.Failed)
+            {
+                throw new Exception($"Update failed: {result.Exception?.Message}");
             }
         }
 
