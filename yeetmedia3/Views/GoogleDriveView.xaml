@@ -119,7 +119,8 @@
                      IsVisible="{Binding IsAuthenticated}">
             <CollectionView ItemsSource="{Binding Files}"
                             SelectedItem="{Binding SelectedFile}"
-                            SelectionMode="Single">
+                            SelectionMode="Single"
+                            SelectionChanged="OnSelectionChanged">
                 <CollectionView.EmptyView>
                     <VerticalStackLayout VerticalOptions="Center" HorizontalOptions="Center" Spacing="10">
                         <Image Source="dotnet_bot.png"
@@ -139,16 +140,33 @@
 
                 <CollectionView.ItemTemplate>
                     <DataTemplate>
-                        <Frame Padding="10"
-                               Margin="5"
-                               BackgroundColor="{AppThemeBinding Light=#F8F9FA, Dark=#2A2A2A}"
-                               BorderColor="{AppThemeBinding Light=#DEE2E6, Dark=#444444}"
-                               CornerRadius="5">
-                            <Frame.GestureRecognizers>
+                        <Border Padding="10"
+                                Margin="5"
+                                Stroke="{AppThemeBinding Light=#DEE2E6, Dark=#444444}"
+                                StrokeThickness="2"
+                                StrokeShape="RoundRectangle 5">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup Name="CommonStates">
+                                    <VisualState Name="Normal">
+                                        <VisualState.Setters>
+                                            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#F8F9FA, Dark=#2A2A2A}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState Name="Selected">
+                                        <VisualState.Setters>
+                                            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#E3F2FD, Dark=#1565C0}" />
+                                            <Setter Property="Stroke" Value="#2196F3" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <Border.GestureRecognizers>
+                                <TapGestureRecognizer NumberOfTapsRequired="1"
+                                                      Tapped="OnItemTapped"/>
                                 <TapGestureRecognizer NumberOfTapsRequired="2"
                                                       Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.OpenItemCommand}"
                                                       CommandParameter="{Binding .}"/>
-                            </Frame.GestureRecognizers>
+                            </Border.GestureRecognizers>
 
                             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
                                 <!-- File Icon -->
@@ -185,7 +203,7 @@
                                        TextColor="Gray"
                                        VerticalOptions="Center"/>
                             </Grid>
-                        </Frame>
+                        </Border>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
