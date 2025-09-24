@@ -38,6 +38,9 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         // Initialize JSON commands
         NewJsonFileCommand = new Command(async () => await NewJsonFileAsync());
         EditJsonFileCommand = new Command<DriveFile>(async (file) => await EditJsonFileAsync(file));
+
+        // Try to auto-sign in with cached credentials
+        Task.Run(async () => await TryAutoSignInAsync());
     }
 
     public bool IsLoading
@@ -367,6 +370,62 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
             { "isNewFile", false }
         };
         await Shell.Current.GoToAsync(nameof(Views.JsonEditorView), navigationParameter);
+    }
+
+    private async Task TryAutoSignInAsync()
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine("[GoogleDriveViewModel] TryAutoSignInAsync starting...");
+
+            // Wait a moment for UI to be ready
+            await Task.Delay(500);
+
+            // Update UI on main thread
+            await MainThread.InvokeOnMainThreadAsync(async () =>
+            {
+                IsLoading = true;
+                ErrorMessage = "Checking for cached credentials...";
+
+                try
+                {
+                    // Try to initialize with cached credentials
+                    await _googleDriveService.InitializeAsync();
+
+                    // Check if we're authenticated after initialization
+                    var isAuth = await _googleDriveService.IsAuthenticatedAsync();
+                    System.Diagnostics.Debug.WriteLine($"[GoogleDriveViewModel] Auto sign-in check: {isAuth}");
+
+                    if (isAuth)
+                    {
+                        System.Diagnostics.Debug.WriteLine("[GoogleDriveViewModel] Auto sign-in successful");
+                        IsAuthenticated = true;
+                        ErrorMessage = string.Empty;
+                        await RefreshFilesAsync();
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("[GoogleDriveViewModel] No cached credentials found");
+                        ErrorMessage = string.Empty;
+                        IsAuthenticated = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GoogleDriveViewModel] Auto sign-in error: {ex.Message}");
+                    ErrorMessage = string.Empty;
+                    IsAuthenticated = false;
+                }
+                finally
+                {
+                    IsLoading = false;
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GoogleDriveViewModel] TryAutoSignInAsync failed: {ex.Message}");
+        }
     }
 
     public event PropertyChangedEventHandler PropertyChanged;
