@@ -7,6 +7,12 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.Maui.Authentication;
 using Microsoft.Maui.Storage;
+#if WINDOWS
+using Google.Apis.Auth.OAuth2;
+using Google.Apis.Util.Store;
+using System.Threading;
+using System.IO;
+#endif
 
 namespace Yeetmedia3.Services;
 
@@ -45,6 +51,9 @@ public class GoogleAuthService
 
     public async Task<GoogleAuthToken> AuthenticateAsync()
     {
+#if WINDOWS
+        return await AuthenticateWindowsAsync();
+#else
         try
         {
             // Generate random state for security
@@ -77,7 +86,53 @@ public class GoogleAuthService
         {
             throw new Exception($"Authentication failed: {ex.Message}", ex);
         }
+#endif
     }
+
+#if WINDOWS
+    private async Task<GoogleAuthToken> AuthenticateWindowsAsync()
+    {
+        try
+        {
+            // Windows desktop app uses OAuth 2.0 for installed applications (no secret required)
+            var clientSecrets = new ClientSecrets
+            {
+                ClientId = _clientId
+                // No client secret needed for desktop installed applications
+            };
+
+            var dataStore = new FileDataStore(Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store"));
+
+            var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                clientSecrets,
+                _scopes,
+                "user",
+                CancellationToken.None,
+                dataStore);
+
+            // Get the access token from the credential
+            var token = await credential.GetAccessTokenForRequestAsync();
+
+            // Create GoogleAuthToken to match our interface
+            var authToken = new GoogleAuthToken
+            {
+                AccessToken = token,
+                TokenType = "Bearer",
+                ExpiresAt = DateTime.UtcNow.AddHours(1), // Google tokens typically expire in 1 hour
+                Scope = string.Join(" ", _scopes)
+            };
+
+            // Save token for consistency
+            await SaveTokenAsync(authToken);
+
+            return authToken;
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Windows authentication failed: {ex.Message}", ex);
+        }
+    }
+#endif
 
     private string BuildAuthorizationUrl(string state)
     {
@@ -221,6 +276,31 @@ public class GoogleAuthService
 
     public async Task SignOutAsync()
     {
+#if WINDOWS
+        // Clear Windows credential store
+        var tokenPath = Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store");
+        if (Directory.Exists(tokenPath))
+        {
+            try
+            {
+                Directory.Delete(tokenPath, true);
+            }
+            catch
+            {
+                // Ignore errors when deleting
+            }
+        }
+
+        // Also clear SecureStorage in case there's any cached data
+        try
+        {
+            SecureStorage.Default.Remove("google_auth_token");
+        }
+        catch
+        {
+            // Ignore errors
+        }
+#else
         var token = await GetSavedTokenAsync();
 
         if (token != null && !string.IsNullOrEmpty(token.AccessToken))
@@ -239,6 +319,36 @@ public class GoogleAuthService
 
         // Clear the saved token
         SecureStorage.Default.Remove("google_auth_token");
+#endif
+
+        // Clear any WebAuthenticator cached sessions (for all platforms)
+        try
+        {
+            await WebAuthenticator.Default.AuthenticateAsync(
+                new WebAuthenticatorOptions
+                {
+                    Url = new Uri($"{AuthorizationEndpoint}?prompt=none"),
+                    CallbackUrl = new Uri(_redirectUri)
+                });
+        }
+        catch
+        {
+            // This will fail, but it clears the session
+        }
+
+        // Clear all cached data in app data directory
+        try
+        {
+            var cacheDir = Path.Combine(FileSystem.CacheDirectory, "GoogleAuth");
+            if (Directory.Exists(cacheDir))
+            {
+                Directory.Delete(cacheDir, true);
+            }
+        }
+        catch
+        {
+            // Ignore errors when deleting cache
+        }
     }
 }
 
