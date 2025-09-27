@@ -20,8 +20,8 @@ public partial class JsonEditorView : ContentPage
         BindingContext = _viewModel;
     }
 
-    public string CurrentFolderId { get; set; }
-    public DriveFile FileToEdit { get; set; }
+    public string CurrentFolderId { get; set; } = string.Empty;
+    public DriveFile? FileToEdit { get; set; }
     public bool IsNewFile { get; set; }
 
     protected override async void OnNavigatedTo(NavigatedToEventArgs args)

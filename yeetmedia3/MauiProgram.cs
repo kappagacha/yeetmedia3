@@ -19,13 +19,17 @@ public static class MauiProgram
             });
 
         // Register Services
+        builder.Services.AddSingleton<WebViewService>();
         builder.Services.AddSingleton<GoogleDriveService>();
+        builder.Services.AddSingleton<DotnetRocksService>();
 
         // Register ViewModels
         builder.Services.AddTransient<GoogleDriveViewModel>();
+        builder.Services.AddTransient<DotnetRocksViewModel>();
 
         // Register Views
         builder.Services.AddTransient<GoogleDriveView>();
+        builder.Services.AddTransient<DotnetRocksView>();
 
 #if DEBUG
     	builder.Logging.AddDebug();

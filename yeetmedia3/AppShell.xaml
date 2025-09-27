@@ -7,9 +7,16 @@
     xmlns:views="clr-namespace:Yeetmedia3.Views"
     Title="YeetMedia3">
 
-    <ShellContent
-        Title="Google Drive"
-        ContentTemplate="{DataTemplate views:GoogleDriveView}"
-        Route="GoogleDriveView" />
+    <FlyoutItem Title=".NET Rocks" Icon="dotnet_bot.png">
+        <ShellContent
+            ContentTemplate="{DataTemplate views:DotnetRocksView}"
+            Route="DotnetRocksView" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="Google Drive" Icon="dotnet_bot.png">
+        <ShellContent
+            ContentTemplate="{DataTemplate views:GoogleDriveView}"
+            Route="GoogleDriveView" />
+    </FlyoutItem>
 
 </Shell>

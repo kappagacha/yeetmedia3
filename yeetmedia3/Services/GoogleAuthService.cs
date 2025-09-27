@@ -1,12 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading.Tasks;
-using Microsoft.Maui.Authentication;
-using Microsoft.Maui.Storage;
 #if WINDOWS
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Util.Store;
@@ -28,7 +21,7 @@ public class GoogleAuthService
     private readonly string _redirectUri;
     private readonly string[] _scopes;
 
-    public GoogleAuthService(string clientId, string redirectUri = null, params string[] scopes)
+    public GoogleAuthService(string clientId, string? redirectUri = null, params string[]? scopes)
     {
         _httpClient = new HttpClient();
         _clientId = clientId;
@@ -255,7 +248,7 @@ public class GoogleAuthService
         await SecureStorage.Default.SetAsync("google_auth_token", json);
     }
 
-    private async Task<GoogleAuthToken> GetSavedTokenAsync()
+    private async Task<GoogleAuthToken?> GetSavedTokenAsync()
     {
         try
         {
@@ -355,13 +348,13 @@ public class GoogleAuthService
 public class GoogleAuthToken
 {
     [JsonPropertyName("access_token")]
-    public string AccessToken { get; set; }
+    public string AccessToken { get; set; } = string.Empty;
 
     [JsonPropertyName("refresh_token")]
-    public string RefreshToken { get; set; }
+    public string RefreshToken { get; set; } = string.Empty;
 
     [JsonPropertyName("token_type")]
-    public string TokenType { get; set; }
+    public string TokenType { get; set; } = string.Empty;
 
     [JsonPropertyName("expires_in")]
     public int ExpiresIn { get; set; }
@@ -369,5 +362,5 @@ public class GoogleAuthToken
     public DateTime ExpiresAt { get; set; }
 
     [JsonPropertyName("scope")]
-    public string Scope { get; set; }
+    public string Scope { get; set; } = string.Empty;
 }

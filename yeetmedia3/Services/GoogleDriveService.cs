@@ -1,13 +1,6 @@
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Drive.v3;
 using Google.Apis.Services;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Maui.Storage;
-using Microsoft.Extensions.Configuration;
 using System.Reflection;
 using Yeetmedia3.Models;
 using System.Text.Json;
@@ -17,8 +10,8 @@ namespace Yeetmedia3.Services;
     {
         private static readonly string[] Scopes = { DriveService.Scope.Drive };
         private readonly AppSettings _appSettings;
-        private DriveService _driveService;
-        private GoogleAuthService _authService;
+        private DriveService? _driveService;
+        private GoogleAuthService? _authService;
 
         public GoogleDriveService()
         {
@@ -41,7 +34,7 @@ namespace Yeetmedia3.Services;
             return JsonSerializer.Deserialize<AppSettings>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
-            });
+            }) ?? throw new InvalidOperationException("Failed to deserialize app settings");
         }
 
         public async Task InitializeAsync()
@@ -109,11 +102,16 @@ namespace Yeetmedia3.Services;
         }
 #endif
 
-        public async Task<IList<Google.Apis.Drive.v3.Data.File>> ListFilesAsync(int pageSize = 10, string query = null)
+        public async Task<IList<Google.Apis.Drive.v3.Data.File>> ListFilesAsync(int pageSize = 10, string? query = null)
         {
             if (_driveService == null)
             {
                 await InitializeAsync();
+            }
+
+            if (_driveService == null)
+            {
+                throw new InvalidOperationException("Drive service could not be initialized");
             }
 
             var listRequest = _driveService.Files.List();
@@ -216,7 +214,7 @@ namespace Yeetmedia3.Services;
             }
         }
 
-        public async Task<string> UploadFileAsync(string fileName, Stream fileContent, string mimeType, string parentFolderId = null)
+        public async Task<string> UploadFileAsync(string fileName, Stream fileContent, string mimeType, string? parentFolderId = null)
         {
             if (_driveService == null)
             {

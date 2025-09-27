@@ -15,8 +15,8 @@ public class JsonEditorViewModel : INotifyPropertyChanged
     private string _jsonContent = "{\n  \n}";
     private string _statusMessage = "Ready";
     private string _statusColor = "Gray";
-    private string _currentFileId;
-    private string _currentFolderId;
+    private string _currentFileId = string.Empty;
+    private string _currentFolderId = string.Empty;
 
     public JsonEditorViewModel(GoogleDriveService googleDriveService)
     {
@@ -138,7 +138,11 @@ public class JsonEditorViewModel : INotifyPropertyChanged
             ValidateJson();
             if (StatusColor == "Red")
             {
-                await Application.Current.MainPage.DisplayAlert("Error", "Please fix JSON errors before saving", "OK");
+                var window = Application.Current?.Windows.FirstOrDefault();
+                if (window?.Page != null)
+                {
+                    await window.Page.DisplayAlert("Error", "Please fix JSON errors before saving", "OK");
+                }
                 return;
             }
 
@@ -184,7 +188,11 @@ public class JsonEditorViewModel : INotifyPropertyChanged
         {
             StatusMessage = $"Save failed: {ex.Message}";
             StatusColor = "Red";
-            await Application.Current.MainPage.DisplayAlert("Error", $"Failed to save: {ex.Message}", "OK");
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Error", $"Failed to save: {ex.Message}", "OK");
+            }
         }
     }
 
@@ -192,7 +200,7 @@ public class JsonEditorViewModel : INotifyPropertyChanged
     {
         FileName = "untitled.json";
         JsonContent = "{\n  \n}";
-        _currentFileId = null;
+        _currentFileId = string.Empty;
         StatusMessage = "New file created";
         StatusColor = "Gray";
     }
@@ -230,9 +238,9 @@ public class JsonEditorViewModel : INotifyPropertyChanged
         _currentFolderId = folderId;
     }
 
-    public event PropertyChangedEventHandler PropertyChanged;
+    public event PropertyChangedEventHandler? PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null)
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }

@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Yeetmedia3.Views.DotnetRocksView"
+             Title=".NET Rocks! Podcast">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Padding="10">
+
+        <!-- Header -->
+        <VerticalStackLayout Grid.Row="0" Spacing="5" Margin="0,0,0,10">
+            <Label Text=".NET Rocks! Podcast Downloader"
+                   FontSize="22"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center"
+                   TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"/>
+
+            <Label Text="Download episodes to local storage or Google Drive"
+                   FontSize="13"
+                   HorizontalOptions="Center"
+                   TextColor="Gray"/>
+        </VerticalStackLayout>
+
+        <!-- Episode Input Section -->
+        <Border Grid.Row="1"
+                BackgroundColor="{AppThemeBinding Light=#F8F8F8, Dark=#2A2A2A}"
+                Stroke="{AppThemeBinding Light=#E0E0E0, Dark=#444444}"
+                StrokeThickness="1"
+                Padding="10"
+                Margin="0,0,0,8">
+            <VerticalStackLayout Spacing="3">
+                    <Label Text="Episode Number"
+                           FontAttributes="Bold"
+                           FontSize="14"/>
+                    <Entry x:Name="EpisodeNumberEntry"
+                           Text="{Binding EpisodeNumber}"
+                           Placeholder="Enter episode number (e.g., 1900)"
+                           Keyboard="Numeric"
+                           FontSize="15"
+                           BackgroundColor="{AppThemeBinding Light=White, Dark=#1E1E1E}"/>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- Episode Info Section -->
+        <Border Grid.Row="2"
+                BackgroundColor="{AppThemeBinding Light=#F0F8FF, Dark=#1A2332}"
+                Stroke="{AppThemeBinding Light=#B0D4FF, Dark=#2E4E7E}"
+                StrokeThickness="1"
+                Padding="10"
+                Margin="0,0,0,8"
+                IsVisible="{Binding EpisodeTitle, Converter={StaticResource StringToBoolConverter}}">
+
+            <VerticalStackLayout Spacing="5">
+                <Label Text="{Binding EpisodeTitle}"
+                       FontSize="16"
+                       FontAttributes="Bold"
+                       TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"
+                       LineBreakMode="WordWrap"/>
+
+                <Label Text="{Binding EpisodeDescription}"
+                       FontSize="13"
+                       TextColor="{AppThemeBinding Light=#666666, Dark=#CCCCCC}"
+                       LineBreakMode="WordWrap"
+                       MaxLines="2"/>
+
+                <HorizontalStackLayout Spacing="15">
+                    <Label FontSize="12"
+                           TextColor="Gray">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Published: "/>
+                                <Span Text="{Binding EpisodePublishDate, StringFormat='{0:MMM dd, yyyy}'}"
+                                      FontAttributes="Bold"/>
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+
+                    <Label Text="✓ Cached"
+                           FontSize="12"
+                           TextColor="Green"
+                           FontAttributes="Bold"
+                           IsVisible="{Binding IsEpisodeCached}"/>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- Action Buttons -->
+        <ScrollView Grid.Row="3" VerticalOptions="Fill">
+            <VerticalStackLayout Spacing="8"
+                                 VerticalOptions="Start">
+
+                <!-- Download to Local Button -->
+                <Button Text="Download to Device"
+                        Command="{Binding DownloadEpisodeCommand}"
+                        BackgroundColor="#28A745"
+                        TextColor="White"
+                        HeightRequest="44"
+                        FontSize="15"
+                        IsEnabled="{Binding IsDownloading, Converter={StaticResource InverseBoolConverter}}"/>
+
+                <!-- Download to Google Drive Button -->
+                <Button Text="Download to Google Drive"
+                        Command="{Binding DownloadToDriveCommand}"
+                        BackgroundColor="#4285F4"
+                        TextColor="White"
+                        HeightRequest="44"
+                        FontSize="15"
+                        IsEnabled="{Binding IsDownloading, Converter={StaticResource InverseBoolConverter}}"/>
+
+                <!-- Play Button -->
+                <Button Text="Play Episode"
+                        Command="{Binding PlayEpisodeCommand}"
+                        BackgroundColor="#FF6B6B"
+                        TextColor="White"
+                        HeightRequest="44"
+                        FontSize="15"
+                        IsEnabled="{Binding IsEpisodeCached}"/>
+
+                <!-- Open Folder Button -->
+                <Button Text="Open Downloads Folder"
+                        Command="{Binding OpenDownloadsFolderCommand}"
+                        BackgroundColor="#17A2B8"
+                        TextColor="White"
+                        HeightRequest="44"
+                        FontSize="15"/>
+
+                <!-- Clear Cache Button -->
+                <Button Text="Clear All Cache"
+                        Command="{Binding ClearCacheCommand}"
+                        BackgroundColor="#6C757D"
+                        TextColor="White"
+                        HeightRequest="42"
+                        FontSize="14"
+                        Margin="0,15,0,0"/>
+
+                <!-- Navigate to Google Drive -->
+                <Button Text="Go to Google Drive"
+                        Clicked="OnNavigateToGoogleDrive"
+                        BackgroundColor="#FFC107"
+                        TextColor="Black"
+                        HeightRequest="42"
+                        FontSize="14"/>
+            </VerticalStackLayout>
+        </ScrollView>
+
+        <!-- Status/Loading Section with Progress Bar Background -->
+        <Border Grid.Row="4"
+                BackgroundColor="{AppThemeBinding Light=#FFF9E6, Dark=#3A3A2A}"
+                Stroke="{AppThemeBinding Light=#FFE4B5, Dark=#5A5A3A}"
+                StrokeThickness="1"
+                Padding="0"
+                Margin="0,8,0,0">
+            <Grid>
+                <!-- Progress bar in background -->
+                <ProgressBar Progress="{Binding DownloadProgress}"
+                             VerticalOptions="Fill"
+                             HorizontalOptions="Fill"
+                             ProgressColor="{AppThemeBinding Light=#FFE4B580, Dark=#5A5A3A80}"
+                             BackgroundColor="Transparent"
+                             IsVisible="{Binding IsDownloading}"/>
+
+                <!-- Status content on top -->
+                <HorizontalStackLayout Spacing="10"
+                                       Padding="10"
+                                       BackgroundColor="Transparent">
+                    <ActivityIndicator IsRunning="{Binding IsLoading}"
+                                       IsVisible="{Binding IsLoading}"
+                                       Color="#512BD4"
+                                       WidthRequest="20"
+                                       HeightRequest="20"/>
+
+                    <ActivityIndicator IsRunning="{Binding IsDownloading}"
+                                       IsVisible="{Binding IsDownloading}"
+                                       Color="#4285F4"
+                                       WidthRequest="20"
+                                       HeightRequest="20"/>
+
+                    <Label Text="{Binding StatusMessage}"
+                           VerticalOptions="Center"
+                           FontSize="14"
+                           TextColor="{AppThemeBinding Light=#666666, Dark=#CCCCCC}"/>
+
+                    <!-- Download percentage when downloading -->
+                    <Label Text="{Binding DownloadProgressPercent}"
+                           VerticalOptions="Center"
+                           FontSize="14"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"
+                           IsVisible="{Binding IsDownloading}"/>
+                </HorizontalStackLayout>
+            </Grid>
+        </Border>
+
+    </Grid>
+
+</ContentPage>

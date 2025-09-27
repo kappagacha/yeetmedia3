@@ -12,9 +12,9 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
     private readonly GoogleDriveService _googleDriveService;
     private bool _isLoading;
     private bool _isAuthenticated;
-    private string _errorMessage;
-    private ObservableCollection<DriveFile> _files;
-    private DriveFile _selectedFile;
+    private string _errorMessage = string.Empty;
+    private ObservableCollection<DriveFile> _files = new ObservableCollection<DriveFile>();
+    private DriveFile? _selectedFile;
     private string _currentFolderId = "root";
     private string _currentFolderName = "My Drive";
     private Stack<(string Id, string Name)> _navigationStack = new Stack<(string, string)>();
@@ -86,7 +86,7 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         }
     }
 
-    public DriveFile SelectedFile
+    public DriveFile? SelectedFile
     {
         get => _selectedFile;
         set
@@ -263,12 +263,20 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
             using var fileStream = System.IO.File.Create(localPath);
             await stream.CopyToAsync(fileStream);
 
-            await Application.Current.MainPage.DisplayAlert("Success", $"File downloaded to: {localPath}", "OK");
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Success", $"File downloaded to: {localPath}", "OK");
+            }
         }
         catch (Exception ex)
         {
             ErrorMessage = $"Download failed: {ex.Message}";
-            await Application.Current.MainPage.DisplayAlert("Error", ErrorMessage, "OK");
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Error", ErrorMessage, "OK");
+            }
         }
         finally
         {
@@ -351,7 +359,11 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            await Application.Current.MainPage.DisplayAlert("Error", $"Failed to open JSON editor: {ex.Message}", "OK");
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Error", $"Failed to open JSON editor: {ex.Message}", "OK");
+            }
         }
     }
 
@@ -359,7 +371,11 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
     {
         if (file == null || !file.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
         {
-            await Application.Current.MainPage.DisplayAlert("Error", "Please select a JSON file to edit", "OK");
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Error", "Please select a JSON file to edit", "OK");
+            }
             return;
         }
 
@@ -428,9 +444,9 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         }
     }
 
-    public event PropertyChangedEventHandler PropertyChanged;
+    public event PropertyChangedEventHandler? PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null)
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
