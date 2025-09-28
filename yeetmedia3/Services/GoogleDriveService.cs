@@ -144,6 +144,11 @@ namespace Yeetmedia3.Services;
                 await InitializeAsync();
             }
 
+            if (_driveService == null)
+            {
+                throw new InvalidOperationException("Drive service is not initialized");
+            }
+
             var request = _driveService.Files.Get(fileId);
             request.Fields = "id, name, mimeType, size, modifiedTime, parents, webViewLink, description";
 
@@ -155,6 +160,11 @@ namespace Yeetmedia3.Services;
             if (_driveService == null)
             {
                 await InitializeAsync();
+            }
+
+            if (_driveService == null)
+            {
+                throw new InvalidOperationException("Drive service is not initialized");
             }
 
             var request = _driveService.Files.Get(fileId);
@@ -236,6 +246,11 @@ namespace Yeetmedia3.Services;
                 fileMetadata.Parents = new List<string> { "root" };
             }
 
+            if (_driveService == null)
+            {
+                throw new InvalidOperationException("Drive service is not initialized");
+            }
+
             FilesResource.CreateMediaUpload request;
             request = _driveService.Files.Create(fileMetadata, fileContent, mimeType);
             request.Fields = "id, name, mimeType, size, modifiedTime, parents, webViewLink";
@@ -246,7 +261,7 @@ namespace Yeetmedia3.Services;
                 throw new Exception($"Upload failed: {result.Exception?.Message}");
             }
 
-            return request.ResponseBody?.Id;
+            return request.ResponseBody?.Id ?? throw new InvalidOperationException("Upload succeeded but no file ID was returned");
         }
 
         public async Task UpdateFileAsync(string fileId, Stream fileContent, string mimeType)
@@ -257,6 +272,11 @@ namespace Yeetmedia3.Services;
             }
 
             var fileMetadata = new Google.Apis.Drive.v3.Data.File();
+
+            if (_driveService == null)
+            {
+                throw new InvalidOperationException("Drive service is not initialized");
+            }
 
             FilesResource.UpdateMediaUpload request;
             request = _driveService.Files.Update(fileMetadata, fileId, fileContent, mimeType);

@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:Yeetmedia3.ViewModels"
+             xmlns:googleapi="clr-namespace:Google.Apis.Drive.v3.Data;assembly=Google.Apis.Drive.v3"
              x:Class="Yeetmedia3.Views.GoogleDriveView"
+             x:DataType="viewmodels:GoogleDriveViewModel"
              Title="Google Drive">
 
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Padding="10">
@@ -85,14 +88,14 @@
                    Placeholder="Search files..."
                    ReturnType="Search"
                    ReturnCommand="{Binding SearchFilesCommand}"
-                   ReturnCommandParameter="{Binding Source={x:Reference SearchEntry}, Path=Text}"
+                   ReturnCommandParameter="{Binding Text, Source={x:Reference SearchEntry}}"
                    BackgroundColor="{AppThemeBinding Light=White, Dark=#2A2A2A}"
                    PlaceholderColor="Gray"/>
 
             <Button Grid.Column="1"
                     Text="Search"
                     Command="{Binding SearchFilesCommand}"
-                    CommandParameter="{Binding Source={x:Reference SearchEntry}, Path=Text}"
+                    CommandParameter="{Binding Text, Source={x:Reference SearchEntry}}"
                     BackgroundColor="#007BFF"
                     TextColor="White"
                     Padding="10,0"/>
@@ -139,7 +142,7 @@
                 </CollectionView.EmptyView>
 
                 <CollectionView.ItemTemplate>
-                    <DataTemplate>
+                    <DataTemplate x:DataType="googleapi:File">
                         <Border Padding="10"
                                 Margin="5"
                                 Stroke="{AppThemeBinding Light=#DEE2E6, Dark=#444444}"
@@ -164,7 +167,7 @@
                                 <TapGestureRecognizer NumberOfTapsRequired="1"
                                                       Tapped="OnItemTapped"/>
                                 <TapGestureRecognizer NumberOfTapsRequired="2"
-                                                      Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.OpenItemCommand}"
+                                                      Command="{Binding Path=BindingContext.OpenItemCommand, Source={RelativeSource AncestorType={x:Type ContentPage}}}"
                                                       CommandParameter="{Binding .}"/>
                             </Border.GestureRecognizers>
 

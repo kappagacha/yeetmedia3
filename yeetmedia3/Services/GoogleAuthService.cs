@@ -169,6 +169,11 @@ public class GoogleAuthService
             PropertyNameCaseInsensitive = true
         });
 
+        if (token == null)
+        {
+            throw new Exception("Failed to deserialize token response");
+        }
+
         // Save the token
         await SaveTokenAsync(token);
 
@@ -199,6 +204,11 @@ public class GoogleAuthService
             PropertyNameCaseInsensitive = true
         });
 
+        if (token == null)
+        {
+            throw new Exception("Failed to deserialize refresh token response");
+        }
+
         // Update the saved token
         await SaveTokenAsync(token);
 
@@ -211,7 +221,7 @@ public class GoogleAuthService
         return token != null && !string.IsNullOrEmpty(token.AccessToken);
     }
 
-    public async Task<GoogleAuthToken> GetValidTokenAsync()
+    public async Task<GoogleAuthToken?> GetValidTokenAsync()
     {
         var token = await GetSavedTokenAsync();
 
