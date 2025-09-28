@@ -309,63 +309,6 @@ public class DotnetRocksService
         }
     }
 
-    public async Task<string> DownloadEpisodeToGoogleDriveAsync(
-        int episodeNumber,
-        GoogleDriveService driveService,
-        string? folderId = null,
-        IProgress<double>? progress = null)
-    {
-        try
-        {
-            // Get episode info
-            var episode = await GetEpisodeInfoAsync(episodeNumber);
-
-            if (string.IsNullOrEmpty(episode.AudioUrl))
-            {
-                throw new Exception($"No audio URL found for episode {episodeNumber}");
-            }
-
-            var fileName = $"dotnetrocks_{episodeNumber:D4}_{episode.Title.Replace(":", "").Replace("/", "").Replace("\\", "")}.mp3";
-
-            // Download to stream
-            using var response = await _httpClient.GetAsync(episode.AudioUrl, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            var totalBytes = response.Content.Headers.ContentLength ?? 0;
-            using var memoryStream = new MemoryStream();
-            using var contentStream = await response.Content.ReadAsStreamAsync();
-
-            var buffer = new byte[8192];
-            var totalRead = 0L;
-            int bytesRead;
-
-            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-            {
-                await memoryStream.WriteAsync(buffer, 0, bytesRead);
-                totalRead += bytesRead;
-
-                if (totalBytes > 0)
-                {
-                    progress?.Report((double)totalRead / totalBytes * 0.5); // First 50% for download
-                }
-            }
-
-            // Reset stream position
-            memoryStream.Position = 0;
-
-            // Upload to Google Drive
-            progress?.Report(0.5); // 50% - starting upload
-            var fileId = await driveService.UploadFileAsync(fileName, memoryStream, "audio/mpeg", folderId);
-            progress?.Report(1.0); // 100% - complete
-
-            return fileId;
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[DotnetRocksService] Error downloading episode {episodeNumber} to Drive: {ex}");
-            throw new Exception($"Failed to download episode {episodeNumber} to Drive: {ex.Message}", ex);
-        }
-    }
 
     public string? GetCachedEpisodePath(int episodeNumber)
     {

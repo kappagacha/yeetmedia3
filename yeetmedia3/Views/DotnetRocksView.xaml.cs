@@ -9,9 +9,4 @@ public partial class DotnetRocksView : ContentPage
         InitializeComponent();
         BindingContext = viewModel;
     }
-
-    private async void OnNavigateToGoogleDrive(object sender, EventArgs e)
-    {
-        await Shell.Current.GoToAsync(nameof(GoogleDriveView));
-    }
 }

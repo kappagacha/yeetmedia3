@@ -97,15 +97,6 @@
                         FontSize="15"
                         IsEnabled="{Binding IsDownloading, Converter={StaticResource InverseBoolConverter}}"/>
 
-                <!-- Download to Google Drive Button -->
-                <Button Text="Download to Google Drive"
-                        Command="{Binding DownloadToDriveCommand}"
-                        BackgroundColor="#4285F4"
-                        TextColor="White"
-                        HeightRequest="44"
-                        FontSize="15"
-                        IsEnabled="{Binding IsDownloading, Converter={StaticResource InverseBoolConverter}}"/>
-
                 <!-- Play Button -->
                 <Button Text="Play Episode"
                         Command="{Binding PlayEpisodeCommand}"
@@ -115,30 +106,14 @@
                         FontSize="15"
                         IsEnabled="{Binding IsEpisodeCached}"/>
 
-                <!-- Open Folder Button -->
-                <Button Text="Open Downloads Folder"
-                        Command="{Binding OpenDownloadsFolderCommand}"
-                        BackgroundColor="#17A2B8"
-                        TextColor="White"
-                        HeightRequest="44"
-                        FontSize="15"/>
-
-                <!-- Clear Cache Button -->
-                <Button Text="Clear All Cache"
-                        Command="{Binding ClearCacheCommand}"
+                <!-- Actions Button -->
+                <Button Text="Actions"
+                        Command="{Binding ShowActionsCommand}"
                         BackgroundColor="#6C757D"
                         TextColor="White"
-                        HeightRequest="42"
-                        FontSize="14"
+                        HeightRequest="44"
+                        FontSize="15"
                         Margin="0,15,0,0"/>
-
-                <!-- Navigate to Google Drive -->
-                <Button Text="Go to Google Drive"
-                        Clicked="OnNavigateToGoogleDrive"
-                        BackgroundColor="#FFC107"
-                        TextColor="Black"
-                        HeightRequest="42"
-                        FontSize="14"/>
             </VerticalStackLayout>
         </ScrollView>
 

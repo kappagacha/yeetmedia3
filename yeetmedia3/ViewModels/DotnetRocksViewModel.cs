@@ -35,10 +35,8 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download command executed. IsDownloading: {IsDownloading}");
             await DownloadEpisodeAsync();
         }, () => !IsDownloading);
-        DownloadToDriveCommand = new Command(async () => await DownloadToDriveAsync(), () => !IsDownloading);
         PlayEpisodeCommand = new Command(async () => await PlayEpisodeAsync(), () => IsEpisodeCached);
-        ClearCacheCommand = new Command(() => ClearCache());
-        OpenDownloadsFolderCommand = new Command(async () => await OpenDownloadsFolderAsync());
+        ShowActionsCommand = new Command(async () => await ShowActionsAsync());
 
         // Set default episode number
         EpisodeNumber = 1001; // Default episode
@@ -113,7 +111,6 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             _isDownloading = value;
             OnPropertyChanged();
             ((Command)DownloadEpisodeCommand).ChangeCanExecute();
-            ((Command)DownloadToDriveCommand).ChangeCanExecute();
         }
     }
 
@@ -158,7 +155,6 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             _canDownload = value;
             OnPropertyChanged();
             ((Command)DownloadEpisodeCommand).ChangeCanExecute();
-            ((Command)DownloadToDriveCommand).ChangeCanExecute();
         }
     }
 
@@ -174,10 +170,8 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     }
 
     public ICommand DownloadEpisodeCommand { get; }
-    public ICommand DownloadToDriveCommand { get; }
     public ICommand PlayEpisodeCommand { get; }
-    public ICommand ClearCacheCommand { get; }
-    public ICommand OpenDownloadsFolderCommand { get; }
+    public ICommand ShowActionsCommand { get; }
 
 
     private async Task DownloadEpisodeAsync()
@@ -253,93 +247,6 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
-    private async Task DownloadToDriveAsync()
-    {
-        try
-        {
-            IsDownloading = true;
-            IsLoading = true;
-            DownloadProgress = 0;
-            StatusMessage = "Checking Google Drive authentication...";
-
-            // Check if authenticated
-            if (!await _googleDriveService.IsAuthenticatedAsync())
-            {
-                StatusMessage = "Please sign in to Google Drive first";
-                var authWindow = Application.Current?.Windows.FirstOrDefault();
-                if (authWindow?.Page != null)
-                {
-                    await authWindow.Page.DisplayAlert("Authentication Required",
-                        "Please sign in to Google Drive from the Google Drive page first", "OK");
-                }
-                return;
-            }
-
-            StatusMessage = $"Getting info for episode {EpisodeNumber}...";
-
-            // First get episode info (which will extract the audio URL using WebView)
-            var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
-
-            EpisodeTitle = episode.Title;
-            EpisodeDescription = episode.Description;
-            EpisodeUrl = episode.AudioUrl;
-            EpisodePublishDate = episode.PublishDate;
-
-            if (string.IsNullOrEmpty(episode.AudioUrl))
-            {
-                StatusMessage = $"Could not find download URL for episode {EpisodeNumber}";
-                var errorWindow = Application.Current?.Windows.FirstOrDefault();
-                if (errorWindow?.Page != null)
-                {
-                    await errorWindow.Page.DisplayAlert("Download Error",
-                        $"Could not find audio URL for episode {EpisodeNumber}", "OK");
-                }
-                return;
-            }
-
-            StatusMessage = $"Downloading episode {EpisodeNumber} to Google Drive...";
-            IsLoading = false;
-
-            var progress = new Progress<double>(p =>
-            {
-                DownloadProgress = p;
-                if (p < 0.5)
-                {
-                    StatusMessage = $"Downloading from server: {(int)(p * 200)}%";
-                }
-                else
-                {
-                    StatusMessage = $"Uploading to Google Drive: {(int)((p - 0.5) * 200)}%";
-                }
-            });
-
-            var fileId = await _dotnetRocksService.DownloadEpisodeToGoogleDriveAsync(
-                EpisodeNumber, _googleDriveService, null, progress);
-
-            StatusMessage = $"Successfully uploaded to Google Drive";
-            var successWindow = Application.Current?.Windows.FirstOrDefault();
-            if (successWindow?.Page != null)
-            {
-                await successWindow.Page.DisplayAlert("Success",
-                    $"Episode {EpisodeNumber} uploaded to Google Drive successfully", "OK");
-            }
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Upload to Drive failed: {ex.Message}";
-            var errorWindow = Application.Current?.Windows.FirstOrDefault();
-            if (errorWindow?.Page != null)
-            {
-                await errorWindow.Page.DisplayAlert("Error", ex.Message, "OK");
-            }
-        }
-        finally
-        {
-            IsDownloading = false;
-            IsLoading = false;
-            DownloadProgress = 0;
-        }
-    }
 
     private async Task PlayEpisodeAsync()
     {
@@ -362,6 +269,45 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         catch (Exception ex)
         {
             StatusMessage = $"Failed to play episode: {ex.Message}";
+        }
+    }
+
+    private async Task ShowActionsAsync()
+    {
+        try
+        {
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page == null) return;
+
+            var action = await window.Page.DisplayActionSheet(
+                "Choose Action",
+                "Cancel",
+                null,
+                "Open Downloads Folder",
+                "Clear All Cache");
+
+            if (action == "Open Downloads Folder")
+            {
+                await OpenDownloadsFolderAsync();
+            }
+            else if (action == "Clear All Cache")
+            {
+                // Show confirmation dialog for clearing cache
+                var confirm = await window.Page.DisplayAlert(
+                    "Clear Cache",
+                    "Are you sure you want to clear all downloaded episodes?",
+                    "Yes",
+                    "No");
+
+                if (confirm)
+                {
+                    ClearCache();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Action failed: {ex.Message}";
         }
     }
 
