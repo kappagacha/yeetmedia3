@@ -1,44 +1,75 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
              x:Class="Yeetmedia3.Views.DotnetRocksView"
              Title=".NET Rocks! Podcast">
 
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Padding="10">
 
         <!-- Header -->
-        <VerticalStackLayout Grid.Row="0" Spacing="5" Margin="0,0,0,10">
-            <Label Text=".NET Rocks! Podcast Downloader"
-                   FontSize="22"
-                   FontAttributes="Bold"
-                   HorizontalOptions="Center"
-                   TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"/>
+        <Label Grid.Row="0"
+               Text=".NET Rocks! Podcast"
+               FontSize="24"
+               FontAttributes="Bold"
+               HorizontalOptions="Center"
+               TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"
+               Margin="0,0,0,10"/>
 
-            <Label Text="Download episodes to local storage or Google Drive"
-                   FontSize="13"
-                   HorizontalOptions="Center"
-                   TextColor="Gray"/>
-        </VerticalStackLayout>
+        <!-- Episode Input and Action Buttons Row -->
+        <Grid Grid.Row="1"
+              ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+              ColumnSpacing="5"
+              Margin="0,0,0,10">
 
-        <!-- Episode Input Section -->
-        <Border Grid.Row="1"
-                BackgroundColor="{AppThemeBinding Light=#F8F8F8, Dark=#2A2A2A}"
-                Stroke="{AppThemeBinding Light=#E0E0E0, Dark=#444444}"
-                StrokeThickness="1"
-                Padding="10"
-                Margin="0,0,0,8">
-            <VerticalStackLayout Spacing="3">
-                    <Label Text="Episode Number"
-                           FontAttributes="Bold"
-                           FontSize="14"/>
-                    <Entry x:Name="EpisodeNumberEntry"
-                           Text="{Binding EpisodeNumber}"
-                           Placeholder="Enter episode number (e.g., 1900)"
-                           Keyboard="Numeric"
-                           FontSize="15"
-                           BackgroundColor="{AppThemeBinding Light=White, Dark=#1E1E1E}"/>
-            </VerticalStackLayout>
-        </Border>
+            <!-- Episode Number Input -->
+            <Entry Grid.Column="0"
+                   x:Name="EpisodeNumberEntry"
+                   Text="{Binding EpisodeNumber}"
+                   Placeholder="Episode #"
+                   Keyboard="Numeric"
+                   FontSize="16"
+                   VerticalOptions="Center"
+                   BackgroundColor="{AppThemeBinding Light=#F8F8F8, Dark=#2A2A2A}"/>
+
+            <!-- Download Button -->
+            <Button Grid.Column="1"
+                    Text="⬇"
+                    Command="{Binding DownloadEpisodeCommand}"
+                    BackgroundColor="{AppThemeBinding Light=#28A745, Dark=#20C940}"
+                    TextColor="White"
+                    WidthRequest="44"
+                    HeightRequest="44"
+                    CornerRadius="22"
+                    FontSize="20"
+                    ToolTipProperties.Text="Download Episode"
+                    IsEnabled="{Binding IsDownloading, Converter={StaticResource InverseBoolConverter}}"/>
+
+            <!-- Load Episode Button -->
+            <Button Grid.Column="2"
+                    Text="▶"
+                    Command="{Binding LoadEpisodeCommand}"
+                    BackgroundColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"
+                    TextColor="White"
+                    WidthRequest="44"
+                    HeightRequest="44"
+                    CornerRadius="22"
+                    FontSize="20"
+                    ToolTipProperties.Text="Load in Player"
+                    IsVisible="{Binding IsEpisodeCached}"/>
+
+            <!-- Actions Button -->
+            <Button Grid.Column="3"
+                    Text="⋮"
+                    Command="{Binding ShowActionsCommand}"
+                    BackgroundColor="{AppThemeBinding Light=#6C757D, Dark=#5A6268}"
+                    TextColor="White"
+                    WidthRequest="44"
+                    HeightRequest="44"
+                    CornerRadius="22"
+                    FontSize="20"
+                    ToolTipProperties.Text="More Actions"/>
+        </Grid>
 
         <!-- Episode Info Section -->
         <Border Grid.Row="2"
@@ -83,39 +114,32 @@
             </VerticalStackLayout>
         </Border>
 
-        <!-- Action Buttons -->
-        <ScrollView Grid.Row="3" VerticalOptions="Fill">
-            <VerticalStackLayout Spacing="8"
-                                 VerticalOptions="Start">
+        <!-- MediaElement for audio/video playback -->
+        <toolkit:MediaElement x:Name="MediaPlayer"
+                              Grid.Row="3"
+                              IsVisible="{Binding IsEpisodeCached}"
+                              ShouldAutoPlay="False"
+                              ShouldShowPlaybackControls="True"
+                              VerticalOptions="Fill"
+                              HorizontalOptions="Fill"
+                              BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1E1E1E}"
+                              Margin="0,5,0,5" />
 
-                <!-- Download to Local Button -->
-                <Button Text="Download to Device"
-                        Command="{Binding DownloadEpisodeCommand}"
-                        BackgroundColor="#28A745"
-                        TextColor="White"
-                        HeightRequest="44"
-                        FontSize="15"
-                        IsEnabled="{Binding IsDownloading, Converter={StaticResource InverseBoolConverter}}"/>
-
-                <!-- Play Button -->
-                <Button Text="Play Episode"
-                        Command="{Binding PlayEpisodeCommand}"
-                        BackgroundColor="#FF6B6B"
-                        TextColor="White"
-                        HeightRequest="44"
-                        FontSize="15"
-                        IsEnabled="{Binding IsEpisodeCached}"/>
-
-                <!-- Actions Button -->
-                <Button Text="Actions"
-                        Command="{Binding ShowActionsCommand}"
-                        BackgroundColor="#6C757D"
-                        TextColor="White"
-                        HeightRequest="44"
-                        FontSize="15"
-                        Margin="0,15,0,0"/>
-            </VerticalStackLayout>
-        </ScrollView>
+        <!-- Placeholder when no episode is loaded -->
+        <VerticalStackLayout Grid.Row="3"
+                             IsVisible="{Binding IsEpisodeCached, Converter={StaticResource InverseBoolConverter}}"
+                             VerticalOptions="Center"
+                             HorizontalOptions="Center"
+                             Spacing="10">
+            <Label Text="🎵"
+                   FontSize="60"
+                   HorizontalOptions="Center"
+                   TextColor="{AppThemeBinding Light=#CCCCCC, Dark=#666666}"/>
+            <Label Text="Download an episode to play"
+                   FontSize="16"
+                   HorizontalOptions="Center"
+                   TextColor="{AppThemeBinding Light=#999999, Dark=#777777}"/>
+        </VerticalStackLayout>
 
         <!-- Status/Loading Section with Progress Bar Background -->
         <Border Grid.Row="4"

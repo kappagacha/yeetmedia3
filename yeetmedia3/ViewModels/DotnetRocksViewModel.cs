@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using CommunityToolkit.Maui.Core;
+using CommunityToolkit.Maui.Views;
 using Yeetmedia3.Services;
 
 namespace Yeetmedia3.ViewModels;
@@ -24,6 +27,9 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     private bool _canDownload;
     private bool _isEpisodeCached;
 
+    // Media player properties
+    private MediaElement? _mediaElement;
+
     public DotnetRocksViewModel(DotnetRocksService dotnetRocksService, GoogleDriveService googleDriveService)
     {
         _dotnetRocksService = dotnetRocksService;
@@ -35,7 +41,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download command executed. IsDownloading: {IsDownloading}");
             await DownloadEpisodeAsync();
         }, () => !IsDownloading);
-        PlayEpisodeCommand = new Command(async () => await PlayEpisodeAsync(), () => IsEpisodeCached);
+        LoadEpisodeCommand = new Command(LoadEpisode, () => IsEpisodeCached);
         ShowActionsCommand = new Command(async () => await ShowActionsAsync());
 
         // Set default episode number
@@ -165,12 +171,12 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             _isEpisodeCached = value;
             OnPropertyChanged();
-            ((Command)PlayEpisodeCommand).ChangeCanExecute();
+            ((Command)LoadEpisodeCommand).ChangeCanExecute();
         }
     }
 
     public ICommand DownloadEpisodeCommand { get; }
-    public ICommand PlayEpisodeCommand { get; }
+    public ICommand LoadEpisodeCommand { get; }
     public ICommand ShowActionsCommand { get; }
 
 
@@ -248,29 +254,39 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     }
 
 
-    private async Task PlayEpisodeAsync()
+    // Media Player Methods
+    public void SetMediaElement(MediaElement mediaElement)
+    {
+        _mediaElement = mediaElement;
+    }
+
+    private void LoadEpisode()
     {
         try
         {
-            var filePath = _dotnetRocksService.GetCachedEpisodePath(EpisodeNumber);
-            if (!string.IsNullOrEmpty(filePath))
+            if (_mediaElement == null)
             {
-                // Open the file with the default audio player
-                await Launcher.OpenAsync(new OpenFileRequest
-                {
-                    File = new ReadOnlyFile(filePath)
-                });
+                StatusMessage = "Media player not initialized";
+                return;
             }
-            else
+
+            var filePath = _dotnetRocksService.GetCachedEpisodePath(EpisodeNumber);
+            if (string.IsNullOrEmpty(filePath))
             {
                 StatusMessage = "Episode not found in cache";
+                return;
             }
+
+            // Set the source for the MediaElement
+            _mediaElement.Source = MediaSource.FromFile(filePath);
+            StatusMessage = $"Episode {EpisodeNumber} loaded in player";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Failed to play episode: {ex.Message}";
+            StatusMessage = $"Failed to load episode: {ex.Message}";
         }
     }
+
 
     private async Task ShowActionsAsync()
     {
@@ -334,6 +350,15 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             DownloadedFilePath = cachedPath ?? string.Empty;
         }
+        else
+        {
+            // Clear MediaElement if the cached episode is removed
+            if (_mediaElement != null)
+            {
+                _mediaElement.Stop();
+                _mediaElement.Source = null;
+            }
+        }
     }
 
     private async Task OpenDownloadsFolderAsync()
@@ -353,14 +378,44 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             Process.Start("explorer.exe", downloadPath);
             StatusMessage = "Opened downloads folder";
 #elif ANDROID
-            // On Android, show a message with the path since we can't directly open file explorer
-            var window = Application.Current?.Windows.FirstOrDefault();
-            if (window?.Page != null)
+            // On Android, share the folder path for file managers to open
+            try
             {
-                await window.Page.DisplayAlert("Downloads Location",
-                    $"Episodes are saved to:\n{downloadPath}\n\nYou can access this from your file manager app.", "OK");
+                // Share the folder path as text that file managers can recognize
+                await Share.Default.RequestAsync(new ShareTextRequest
+                {
+                    Title = "Open Downloads Folder",
+                    Text = downloadPath,
+                    Subject = "Episode Downloads Location"
+                });
+                StatusMessage = "Shared folder path";
             }
-            StatusMessage = "Downloads path shown";
+            catch
+            {
+                // If sharing doesn't work, copy path to clipboard and show message
+                try
+                {
+                    await Clipboard.Default.SetTextAsync(downloadPath);
+                    var window = Application.Current?.Windows.FirstOrDefault();
+                    if (window?.Page != null)
+                    {
+                        await window.Page.DisplayAlert("Path Copied",
+                            $"Downloads folder path copied to clipboard:\n\n{downloadPath}\n\nPaste this in your file manager to navigate to the folder.", "OK");
+                    }
+                    StatusMessage = "Path copied to clipboard";
+                }
+                catch
+                {
+                    // Final fallback - just show the path
+                    var window = Application.Current?.Windows.FirstOrDefault();
+                    if (window?.Page != null)
+                    {
+                        await window.Page.DisplayAlert("Downloads Location",
+                            $"Episodes are saved to:\n{downloadPath}", "OK");
+                    }
+                    StatusMessage = "Downloads path shown";
+                }
+            }
 #else
             // For other platforms, try to open with the default handler
             await Launcher.OpenAsync(new OpenFileRequest
