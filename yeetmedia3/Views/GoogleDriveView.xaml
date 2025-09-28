@@ -167,7 +167,7 @@
                                 <TapGestureRecognizer NumberOfTapsRequired="1"
                                                       Tapped="OnItemTapped"/>
                                 <TapGestureRecognizer NumberOfTapsRequired="2"
-                                                      Command="{Binding Path=BindingContext.OpenItemCommand, Source={RelativeSource AncestorType={x:Type ContentPage}}}"
+                                                      Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.OpenItemCommand}"
                                                       CommandParameter="{Binding .}"/>
                             </Border.GestureRecognizers>
 
@@ -193,7 +193,7 @@
                                         <Label.FormattedText>
                                             <FormattedString>
                                                 <Span Text="Modified: "/>
-                                                <Span Text="{Binding ModifiedTime, StringFormat='{0:MMM dd, yyyy}'}"/>
+                                                <Span Text="{Binding ModifiedTimeDateTimeOffset, StringFormat='{0:MMM dd, yyyy}'}"/>
                                             </FormattedString>
                                         </Label.FormattedText>
                                     </Label>
@@ -223,16 +223,17 @@
                            HeightRequest="50"/>
 
         <!-- Error Message -->
-        <Frame Grid.Row="4"
-               IsVisible="{Binding ErrorMessage, Converter={StaticResource StringToBoolConverter}}"
-               BackgroundColor="#F8D7DA"
-               BorderColor="#F5C6CB"
-               Padding="10"
-               Margin="0,5">
+        <Border Grid.Row="4"
+                IsVisible="{Binding ErrorMessage, Converter={StaticResource StringToBoolConverter}}"
+                BackgroundColor="#F8D7DA"
+                Stroke="#F5C6CB"
+                StrokeThickness="1"
+                Padding="10"
+                Margin="0,5">
             <Label Text="{Binding ErrorMessage}"
                    TextColor="#721C24"
                    FontSize="14"/>
-        </Frame>
+        </Border>
 
     </Grid>
 

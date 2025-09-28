@@ -29,6 +29,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
     // Media player properties
     private MediaElement? _mediaElement;
+    private bool _isAutoAdvancing = false;
 
     public DotnetRocksViewModel(DotnetRocksService dotnetRocksService, GoogleDriveService googleDriveService)
     {
@@ -41,8 +42,10 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download command executed. IsDownloading: {IsDownloading}");
             await DownloadEpisodeAsync();
         }, () => !IsDownloading);
-        LoadEpisodeCommand = new Command(LoadEpisode, () => IsEpisodeCached);
         ShowActionsCommand = new Command(async () => await ShowActionsAsync());
+        IncrementEpisodeCommand = new Command(() => EpisodeNumber++);
+        DecrementEpisodeCommand = new Command(() => { if (EpisodeNumber > 1) EpisodeNumber--; });
+        PlayEpisodeCommand = new Command(async () => await PlayEpisodeAsync(), () => !IsDownloading && !IsEpisodeCached);
 
         // Set default episode number
         EpisodeNumber = 1001; // Default episode
@@ -117,6 +120,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             _isDownloading = value;
             OnPropertyChanged();
             ((Command)DownloadEpisodeCommand).ChangeCanExecute();
+            ((Command)PlayEpisodeCommand).ChangeCanExecute();
         }
     }
 
@@ -171,13 +175,14 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             _isEpisodeCached = value;
             OnPropertyChanged();
-            ((Command)LoadEpisodeCommand).ChangeCanExecute();
         }
     }
 
     public ICommand DownloadEpisodeCommand { get; }
-    public ICommand LoadEpisodeCommand { get; }
     public ICommand ShowActionsCommand { get; }
+    public ICommand IncrementEpisodeCommand { get; }
+    public ICommand DecrementEpisodeCommand { get; }
+    public ICommand PlayEpisodeCommand { get; }
 
 
     private async Task DownloadEpisodeAsync()
@@ -258,9 +263,45 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     public void SetMediaElement(MediaElement mediaElement)
     {
         _mediaElement = mediaElement;
+
+        // Subscribe to MediaEnded event to auto-play next episode
+        _mediaElement.MediaEnded += OnMediaEnded;
+
+        // If episode is already cached when MediaElement is set, load it
+        if (IsEpisodeCached)
+        {
+            LoadEpisode();
+        }
     }
 
-    private void LoadEpisode()
+    private async void OnMediaEnded(object? sender, EventArgs e)
+    {
+        try
+        {
+            // Add a small delay to avoid COM exceptions on Windows
+            await Task.Delay(100);
+
+            // Ensure we're on the UI thread
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                // Set flag to indicate we're auto-advancing
+                _isAutoAdvancing = true;
+
+                // Increment to next episode
+                EpisodeNumber++;
+
+                // The increment will trigger CheckIfCached which will:
+                // - Load the episode if cached with auto-play
+                // - Show download button if not cached
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error playing next episode: {ex.Message}";
+        }
+    }
+
+    private void LoadEpisode(bool autoPlay = false)
     {
         try
         {
@@ -277,9 +318,31 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 return;
             }
 
-            // Set the source for the MediaElement
-            _mediaElement.Source = MediaSource.FromFile(filePath);
-            StatusMessage = $"Episode {EpisodeNumber} loaded in player";
+            // Ensure we're on the UI thread when modifying MediaElement
+            MainThread.BeginInvokeOnMainThread(async () =>
+            {
+                try
+                {
+                    // Stop current playback before changing source
+                    _mediaElement.Stop();
+
+                    // Set the source for the MediaElement
+                    _mediaElement.Source = MediaSource.FromFile(filePath);
+                    StatusMessage = $"Episode {EpisodeNumber} loaded in player";
+
+                    // Only auto-play when specifically requested (e.g., after episode ends)
+                    if (autoPlay)
+                    {
+                        // Small delay to ensure source is loaded
+                        await Task.Delay(100);
+                        _mediaElement.Play();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    StatusMessage = $"Failed to load episode: {ex.Message}";
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -341,7 +404,31 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
-    private void CheckIfCached()
+    private async Task PlayEpisodeAsync()
+    {
+        // First download the episode
+        await DownloadEpisodeAsync();
+
+        // Then load it into the player if download succeeded
+        if (IsEpisodeCached)
+        {
+            LoadEpisode();
+        }
+    }
+
+    private async Task DownloadAndPlayEpisodeAsync()
+    {
+        // First download the episode
+        await DownloadEpisodeAsync();
+
+        // Then load it into the player with auto-play if download succeeded
+        if (IsEpisodeCached)
+        {
+            LoadEpisode(true); // Auto-play when auto-advancing
+        }
+    }
+
+    private async void CheckIfCached()
     {
         var cachedPath = _dotnetRocksService.GetCachedEpisodePath(EpisodeNumber);
         IsEpisodeCached = !string.IsNullOrEmpty(cachedPath);
@@ -349,16 +436,36 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         if (IsEpisodeCached)
         {
             DownloadedFilePath = cachedPath ?? string.Empty;
+            // Automatically load the cached episode into the media player
+            // Pass true for autoPlay only if we're auto-advancing from a finished episode
+            LoadEpisode(_isAutoAdvancing);
+
+            // Reset the flag after use
+            _isAutoAdvancing = false;
         }
         else
         {
-            // Clear MediaElement if the cached episode is removed
-            if (_mediaElement != null)
+            // If auto-advancing and episode is not cached, download and play it
+            if (_isAutoAdvancing)
             {
-                _mediaElement.Stop();
-                _mediaElement.Source = null;
+                _isAutoAdvancing = false; // Reset flag before async operation
+
+                // Download and play the episode
+                await DownloadAndPlayEpisodeAsync();
+            }
+            else
+            {
+                // Clear MediaElement if the cached episode is removed
+                if (_mediaElement != null)
+                {
+                    _mediaElement.Stop();
+                    _mediaElement.Source = null;
+                }
             }
         }
+
+        // Update PlayEpisodeCommand availability
+        ((Command)PlayEpisodeCommand).ChangeCanExecute();
     }
 
     private async Task OpenDownloadsFolderAsync()
