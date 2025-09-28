@@ -48,4 +48,18 @@ public partial class GoogleDriveView : ContentPage
             _viewModel.SelectedFile = file;
         }
     }
+
+    private async void OnItemDoubleTapped(object sender, EventArgs e)
+    {
+        if (sender is Element element && element.BindingContext is DriveFile file)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GoogleDriveView] Item double-tapped: {file.Name} (Type: {file.MimeType})");
+
+            // Execute the OpenItemCommand with the file
+            if (_viewModel.OpenItemCommand.CanExecute(file))
+            {
+                await Task.Run(() => _viewModel.OpenItemCommand.Execute(file));
+            }
+        }
+    }
 }

@@ -319,6 +319,15 @@ public class DotnetRocksService
         return File.Exists(filePath) ? filePath : null;
 }
 
+    public void CacheEpisodeUrl(int episodeNumber, string audioUrl)
+    {
+        if (!string.IsNullOrEmpty(audioUrl))
+        {
+            _episodeUrlCache[episodeNumber] = audioUrl;
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksService] Cached URL for episode {episodeNumber}");
+        }
+    }
+
     public void ClearCache()
     {
         var cacheDir = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks");

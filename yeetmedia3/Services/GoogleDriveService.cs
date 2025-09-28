@@ -224,6 +224,36 @@ namespace Yeetmedia3.Services;
             }
         }
 
+        public async Task<string> CreateFolderAsync(string folderName, string? parentFolderId = null)
+        {
+            if (_driveService == null)
+            {
+                await InitializeAsync();
+            }
+
+            if (_driveService == null)
+            {
+                throw new InvalidOperationException("Drive service is not initialized");
+            }
+
+            var folderMetadata = new Google.Apis.Drive.v3.Data.File()
+            {
+                Name = folderName,
+                MimeType = "application/vnd.google-apps.folder"
+            };
+
+            if (!string.IsNullOrEmpty(parentFolderId))
+            {
+                folderMetadata.Parents = new List<string> { parentFolderId };
+            }
+
+            var request = _driveService.Files.Create(folderMetadata);
+            request.Fields = "id";
+
+            var folder = await request.ExecuteAsync();
+            return folder.Id;
+        }
+
         public async Task<string> UploadFileAsync(string fileName, Stream fileContent, string mimeType, string? parentFolderId = null)
         {
             if (_driveService == null)

@@ -195,15 +195,62 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             DownloadProgress = 0;
             StatusMessage = $"Getting info for episode {EpisodeNumber}...";
 
-            // First get episode info (which will extract the audio URL using WebView)
-            var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+            string? audioUrl = null;
+            string? title = null;
+            string? description = null;
+            DateTime? publishDate = null;
 
-            EpisodeTitle = episode.Title;
-            EpisodeDescription = episode.Description;
-            EpisodeUrl = episode.AudioUrl;
-            EpisodePublishDate = episode.PublishDate;
+            // First, check if metadata exists in Google Drive
+            try
+            {
+                var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(EpisodeNumber);
+                if (metadata != null)
+                {
+                    audioUrl = metadata.AudioUrl;
+                    title = metadata.Title;
+                    description = metadata.Description;
+                    publishDate = metadata.PublishDate;
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Found episode {EpisodeNumber} metadata in Google Drive cache");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error checking Google Drive metadata: {ex.Message}");
+            }
 
-            if (string.IsNullOrEmpty(episode.AudioUrl))
+            // If no metadata in Google Drive or no audio URL, get from website
+            if (string.IsNullOrEmpty(audioUrl))
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Fetching episode {EpisodeNumber} from website");
+                var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+
+                title = episode.Title;
+                description = episode.Description;
+                audioUrl = episode.AudioUrl;
+                publishDate = episode.PublishDate;
+
+                // Save the fetched metadata to Google Drive for future use
+                if (!string.IsNullOrEmpty(audioUrl))
+                {
+                    try
+                    {
+                        await SaveSingleEpisodeMetadataToGoogleDriveAsync(EpisodeNumber, episode);
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Saved episode {EpisodeNumber} metadata to Google Drive cache");
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to save metadata to Google Drive: {ex.Message}");
+                    }
+                }
+            }
+
+            // Update UI with episode info
+            EpisodeTitle = title ?? string.Empty;
+            EpisodeDescription = description ?? string.Empty;
+            EpisodeUrl = audioUrl ?? string.Empty;
+            EpisodePublishDate = publishDate;
+
+            if (string.IsNullOrEmpty(audioUrl))
             {
                 StatusMessage = $"Could not find download URL for episode {EpisodeNumber}";
                 var window = Application.Current?.Windows.FirstOrDefault();
@@ -217,6 +264,9 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
             StatusMessage = $"Downloading episode {EpisodeNumber}...";
             IsLoading = false;
+
+            // Cache the URL in DotnetRocksService so it doesn't fetch again
+            _dotnetRocksService.CacheEpisodeUrl(EpisodeNumber, audioUrl);
 
             var lastReportedProgress = -1;
             var progress = new Progress<double>(p =>
@@ -363,7 +413,8 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 "Cancel",
                 null,
                 "Open Downloads Folder",
-                "Clear All Cache");
+                "Clear All Cache",
+                "Cache Episode Metadata to Google Drive");
 
             if (action == "Open Downloads Folder")
             {
@@ -382,6 +433,10 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 {
                     ClearCache();
                 }
+            }
+            else if (action == "Cache Episode Metadata to Google Drive")
+            {
+                await CacheEpisodeMetadataToGoogleDriveAsync();
             }
         }
         catch (Exception ex)
@@ -543,6 +598,467 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 await window.Page.DisplayAlert("Downloads Location",
                     $"Episodes are saved to:\n{downloadPath}", "OK");
             }
+        }
+    }
+
+    private async Task CacheEpisodeMetadataToGoogleDriveAsync()
+    {
+        try
+        {
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page == null) return;
+
+            // Ask for start episode number
+            var startStr = await window.Page.DisplayPromptAsync(
+                "Cache Episode Metadata",
+                "Enter starting episode number:",
+                placeholder: "e.g., 1",
+                initialValue: "1",
+                keyboard: Keyboard.Numeric);
+
+            if (string.IsNullOrEmpty(startStr)) return;
+
+            // Ask for end episode number
+            var endStr = await window.Page.DisplayPromptAsync(
+                "Cache Episode Metadata",
+                "Enter ending episode number:",
+                placeholder: "e.g., 100",
+                initialValue: "100",
+                keyboard: Keyboard.Numeric);
+
+            if (string.IsNullOrEmpty(endStr)) return;
+
+            if (!int.TryParse(startStr, out int startEpisode) || !int.TryParse(endStr, out int endEpisode))
+            {
+                StatusMessage = "Invalid episode numbers";
+                return;
+            }
+
+            if (startEpisode > endEpisode)
+            {
+                StatusMessage = "Start episode must be less than or equal to end episode";
+                return;
+            }
+
+            // Process the episodes
+            await ProcessEpisodeMetadataBatchAsync(startEpisode, endEpisode);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to cache metadata: {ex.Message}";
+        }
+    }
+
+    private async Task ProcessEpisodeMetadataBatchAsync(int startEpisode, int endEpisode)
+    {
+        try
+        {
+            IsLoading = true;
+            StatusMessage = $"Processing episodes {startEpisode} to {endEpisode}...";
+
+            // Group episodes by 100s
+            int groupSize = 100;
+
+            // Calculate which groups we need to process
+            int startGroup = ((startEpisode - 1) / groupSize) * groupSize + 1; // 5 -> 1, 101 -> 101, 250 -> 201
+            int endGroup = ((endEpisode - 1) / groupSize) * groupSize + 1;
+
+            // Track overall statistics
+            int totalEpisodesProcessed = 0;
+            List<string> groupsProcessed = new List<string>();
+
+            // Process each group
+            for (int currentGroupStart = startGroup; currentGroupStart <= endGroup; currentGroupStart += groupSize)
+            {
+                int currentGroupEnd = currentGroupStart + groupSize - 1; // 1->100, 101->200, etc.
+                var episodeMetadata = new Dictionary<int, Dictionary<string, object>>();
+
+                // Fetch metadata for all episodes in this group range that fall within user's requested range
+                int rangeStart = Math.Max(startEpisode, currentGroupStart);
+                int rangeEnd = Math.Min(endEpisode, currentGroupEnd);
+
+                for (int episode = rangeStart; episode <= rangeEnd; episode++)
+                {
+                    try
+                    {
+                        StatusMessage = $"Fetching metadata for episode {episode} (Group {currentGroupStart}-{currentGroupEnd})...";
+
+                        // Get episode metadata
+                        var episodeInfo = await _dotnetRocksService.GetEpisodeInfoAsync(episode);
+
+                        if (episodeInfo != null)
+                        {
+                            episodeMetadata[episode] = new Dictionary<string, object>
+                            {
+                                ["episodeNumber"] = episode,
+                                ["title"] = episodeInfo.Title ?? string.Empty,
+                                ["description"] = episodeInfo.Description ?? string.Empty,
+                                ["audioUrl"] = episodeInfo.AudioUrl ?? string.Empty,
+                                ["publishDate"] = episodeInfo.PublishDate?.ToString("yyyy-MM-dd") ?? string.Empty
+                            };
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to process episode {episode}: {ex.Message}");
+                    }
+                }
+
+                // Save the group (even if partially filled)
+                if (episodeMetadata.Count > 0)
+                {
+                    await SaveMetadataGroupToGoogleDriveAsync(episodeMetadata, currentGroupStart, currentGroupEnd);
+                    totalEpisodesProcessed += episodeMetadata.Count;
+                    groupsProcessed.Add($"{currentGroupStart:D4}-{currentGroupEnd:D4}");
+                }
+            }
+
+            // Log final summary
+            System.Diagnostics.Debug.WriteLine($"[METADATA SUMMARY] Completed processing:");
+            System.Diagnostics.Debug.WriteLine($"  - Episodes requested: {startEpisode} to {endEpisode}");
+            System.Diagnostics.Debug.WriteLine($"  - Total episodes processed: {totalEpisodesProcessed}");
+            System.Diagnostics.Debug.WriteLine($"  - Groups updated: {string.Join(", ", groupsProcessed)}");
+
+            StatusMessage = $"Successfully cached {totalEpisodesProcessed} episodes across {groupsProcessed.Count} group(s)";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Batch processing failed: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task SaveMetadataGroupToGoogleDriveAsync(Dictionary<int, Dictionary<string, object>> episodeMetadata, int groupStart, int groupEnd)
+    {
+        try
+        {
+            // Initialize Google Drive if needed
+            await _googleDriveService.InitializeAsync();
+
+            // Ensure dotnetrocks folder exists
+            string folderId = await EnsureDotnetRocksFolderAsync();
+
+            string fileName = $"dotnetrocks_metadata_{groupStart:D4}_{groupEnd:D4}.json";
+            Dictionary<int, Dictionary<string, object>> existingMetadata = new Dictionary<int, Dictionary<string, object>>();
+            HashSet<int> existingEpisodes = new HashSet<int>();
+
+            // Check if file already exists in the folder
+            var query = $"name='{fileName}' and '{folderId}' in parents and trashed=false";
+            var files = await _googleDriveService.ListFilesAsync(100, query);
+            var existingFile = files?.FirstOrDefault();
+
+            if (existingFile != null)
+            {
+                // Download and merge with existing data
+                try
+                {
+                    using var existingStream = await _googleDriveService.DownloadFileAsync(existingFile.Id);
+                    using var reader = new StreamReader(existingStream);
+                    var existingJson = await reader.ReadToEndAsync();
+                    var tempDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(existingJson);
+
+                    if (tempDict != null)
+                    {
+                        foreach (var kvp in tempDict)
+                        {
+                            if (int.TryParse(kvp.Key, out int episodeNum))
+                            {
+                                existingMetadata[episodeNum] = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(kvp.Value.GetRawText())!;
+                                existingEpisodes.Add(episodeNum);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error reading existing file: {ex.Message}");
+                }
+            }
+
+            // Track what's being added/updated
+            List<int> newEpisodes = new List<int>();
+            List<int> updatedEpisodes = new List<int>();
+
+            // Merge new metadata with existing (new data overwrites old)
+            foreach (var kvp in episodeMetadata)
+            {
+                if (existingEpisodes.Contains(kvp.Key))
+                {
+                    updatedEpisodes.Add(kvp.Key);
+                }
+                else
+                {
+                    newEpisodes.Add(kvp.Key);
+                }
+                existingMetadata[kvp.Key] = kvp.Value;
+            }
+
+            // Log the changes
+            if (newEpisodes.Count > 0)
+            {
+                newEpisodes.Sort();
+                System.Diagnostics.Debug.WriteLine($"[{fileName}] Adding new episodes: {string.Join(", ", newEpisodes)}");
+                StatusMessage = $"Adding {newEpisodes.Count} new episodes to {fileName}";
+            }
+
+            if (updatedEpisodes.Count > 0)
+            {
+                updatedEpisodes.Sort();
+                System.Diagnostics.Debug.WriteLine($"[{fileName}] Updating existing episodes: {string.Join(", ", updatedEpisodes)}");
+                StatusMessage = $"Updating {updatedEpisodes.Count} existing episodes in {fileName}";
+            }
+
+            // Convert merged metadata to JSON
+            var json = System.Text.Json.JsonSerializer.Serialize(existingMetadata, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+
+            string fileId;
+            string action;
+            if (existingFile != null)
+            {
+                // Update existing file
+                await _googleDriveService.UpdateFileAsync(existingFile.Id, stream, "application/json");
+                fileId = existingFile.Id;
+                action = "Updated";
+            }
+            else
+            {
+                // Create new file in the folder
+                fileId = await _googleDriveService.UploadFileAsync(fileName, stream, "application/json", folderId);
+                action = "Created";
+            }
+
+            // Update the meta file
+            await UpdateMetaFileAsync(groupStart, groupEnd, fileId);
+
+            // Final status with summary
+            var totalEpisodes = existingMetadata.Count;
+            StatusMessage = $"{action} {fileName}: {totalEpisodes} total episodes ({newEpisodes.Count} new, {updatedEpisodes.Count} updated)";
+
+            // Also log to debug output
+            System.Diagnostics.Debug.WriteLine($"[METADATA] {action} {fileName}:");
+            System.Diagnostics.Debug.WriteLine($"  - Total episodes in file: {totalEpisodes}");
+            System.Diagnostics.Debug.WriteLine($"  - New episodes added: {newEpisodes.Count}");
+            System.Diagnostics.Debug.WriteLine($"  - Existing episodes updated: {updatedEpisodes.Count}");
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Failed to save group {groupStart}-{groupEnd}: {ex.Message}", ex);
+        }
+    }
+
+    private async Task SaveSingleEpisodeMetadataToGoogleDriveAsync(int episodeNumber, PodcastEpisode episode)
+    {
+        try
+        {
+            // Create metadata dictionary for this single episode
+            var episodeMetadata = new Dictionary<int, Dictionary<string, object>>
+            {
+                [episodeNumber] = new Dictionary<string, object>
+                {
+                    ["episodeNumber"] = episodeNumber,
+                    ["title"] = episode.Title ?? string.Empty,
+                    ["description"] = episode.Description ?? string.Empty,
+                    ["audioUrl"] = episode.AudioUrl ?? string.Empty,
+                    ["publishDate"] = episode.PublishDate?.ToString("yyyy-MM-dd") ?? string.Empty
+                }
+            };
+
+            // Calculate which group this episode belongs to
+            int groupSize = 100;
+            int groupStart = ((episodeNumber - 1) / groupSize) * groupSize + 1;
+            int groupEnd = groupStart + groupSize - 1;
+
+            // Reuse existing save method
+            await SaveMetadataGroupToGoogleDriveAsync(episodeMetadata, groupStart, groupEnd);
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Failed to save single episode metadata: {ex.Message}", ex);
+        }
+    }
+
+    private async Task<PodcastEpisode?> GetEpisodeMetadataFromGoogleDriveAsync(int episodeNumber)
+    {
+        try
+        {
+            // Initialize Google Drive if needed
+            await _googleDriveService.InitializeAsync();
+
+            // Calculate which group file this episode would be in
+            int groupSize = 100;
+            int groupStart = ((episodeNumber - 1) / groupSize) * groupSize + 1;
+            int groupEnd = groupStart + groupSize - 1;
+
+            string fileName = $"dotnetrocks_metadata_{groupStart:D4}_{groupEnd:D4}.json";
+
+            // Try to find the metadata file in the dotnetrocks folder
+            const string folderName = "dotnetrocks";
+            var folderQuery = $"name='{folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+            var folders = await _googleDriveService.ListFilesAsync(10, folderQuery);
+            var folder = folders?.FirstOrDefault();
+
+            if (folder == null)
+            {
+                return null; // No metadata folder exists
+            }
+
+            // Look for the specific metadata file in the folder
+            var fileQuery = $"name='{fileName}' and '{folder.Id}' in parents and trashed=false";
+            var files = await _googleDriveService.ListFilesAsync(10, fileQuery);
+            var metadataFile = files?.FirstOrDefault();
+
+            if (metadataFile == null)
+            {
+                return null; // Metadata file doesn't exist
+            }
+
+            // Download and parse the metadata file
+            using var stream = await _googleDriveService.DownloadFileAsync(metadataFile.Id);
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+
+            var allMetadata = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(json);
+
+            if (allMetadata != null && allMetadata.TryGetValue(episodeNumber.ToString(), out var episodeElement))
+            {
+                var episodeData = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(episodeElement.GetRawText());
+
+                if (episodeData != null)
+                {
+                    // Parse the metadata into PodcastEpisode
+                    var info = new PodcastEpisode
+                    {
+                        Number = episodeNumber
+                    };
+
+                    if (episodeData.TryGetValue("title", out var titleObj))
+                        info.Title = titleObj?.ToString() ?? string.Empty;
+
+                    if (episodeData.TryGetValue("description", out var descObj))
+                        info.Description = descObj?.ToString() ?? string.Empty;
+
+                    if (episodeData.TryGetValue("audioUrl", out var urlObj))
+                        info.AudioUrl = urlObj?.ToString() ?? string.Empty;
+
+                    if (episodeData.TryGetValue("publishDate", out var dateObj) &&
+                        DateTime.TryParse(dateObj?.ToString(), out var date))
+                        info.PublishDate = date;
+
+                    return info;
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to get metadata from Google Drive: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task<string> EnsureDotnetRocksFolderAsync()
+    {
+        try
+        {
+            const string folderName = "dotnetrocks";
+
+            // Check if folder already exists
+            var query = $"name='{folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+            var folders = await _googleDriveService.ListFilesAsync(10, query);
+            var existingFolder = folders?.FirstOrDefault();
+
+            if (existingFolder != null)
+            {
+                return existingFolder.Id;
+            }
+
+            // Create the folder
+            var folderId = await _googleDriveService.CreateFolderAsync(folderName);
+
+            System.Diagnostics.Debug.WriteLine($"[METADATA] Created 'dotnetrocks' folder in Google Drive with ID: {folderId}");
+
+            return folderId;
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Failed to ensure dotnetrocks folder exists: {ex.Message}", ex);
+        }
+    }
+
+    private async Task UpdateMetaFileAsync(int groupStart, int groupEnd, string fileId)
+    {
+        try
+        {
+            // Ensure dotnetrocks folder exists
+            string folderId = await EnsureDotnetRocksFolderAsync();
+
+            const string metaFileName = "dotnetrocks_metadata_index.json";
+            Dictionary<string, object>? metaData = null;
+
+            // Try to find existing meta file in the folder
+            var query = $"name='{metaFileName}' and '{folderId}' in parents and trashed=false";
+            var files = await _googleDriveService.ListFilesAsync(100, query);
+            var metaFile = files?.FirstOrDefault();
+
+            if (metaFile != null)
+            {
+                // Download and parse existing meta file
+                using var stream = await _googleDriveService.DownloadFileAsync(metaFile.Id);
+                using var reader = new StreamReader(stream);
+                var json = await reader.ReadToEndAsync();
+                metaData = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+            }
+
+            // Initialize meta data if needed
+            metaData ??= new Dictionary<string, object>
+            {
+                ["lastUpdated"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
+                ["groups"] = new Dictionary<string, object>()
+            };
+
+            // Update groups information
+            var groups = metaData["groups"] as Dictionary<string, object> ?? new Dictionary<string, object>();
+            groups[$"{groupStart:D4}_{groupEnd:D4}"] = new Dictionary<string, object>
+            {
+                ["fileId"] = fileId,
+                ["startEpisode"] = groupStart,
+                ["endEpisode"] = groupEnd,
+                ["lastUpdated"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
+            };
+            metaData["groups"] = groups;
+            metaData["lastUpdated"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+            // Save updated meta file
+            var updatedJson = System.Text.Json.JsonSerializer.Serialize(metaData, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            using var uploadStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(updatedJson));
+
+            if (metaFile != null)
+            {
+                // Update existing file
+                await _googleDriveService.UpdateFileAsync(metaFile.Id, uploadStream, "application/json");
+            }
+            else
+            {
+                // Create new file in the folder
+                await _googleDriveService.UploadFileAsync(metaFileName, uploadStream, "application/json", folderId);
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Failed to update meta file: {ex.Message}", ex);
         }
     }
 
