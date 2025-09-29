@@ -2,9 +2,11 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Windows.Input;
 using CommunityToolkit.Maui.Core;
 using CommunityToolkit.Maui.Views;
+using Yeetmedia3.Models;
 using Yeetmedia3.Services;
 
 namespace Yeetmedia3.ViewModels;
@@ -24,12 +26,24 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     private double _downloadProgress;
     private string _statusMessage = string.Empty;
     private string _downloadedFilePath = string.Empty;
-    private bool _canDownload;
     private bool _isEpisodeCached;
 
     // Media player properties
     private MediaElement? _mediaElement;
     private bool _isAutoAdvancing = false;
+
+    // Playback tracking
+    private PlaybackState? _lastSavedState;
+    private DateTime _lastSaveTime = DateTime.MinValue;
+    private System.Threading.Timer? _periodicSaveTimer;
+    private readonly TimeSpan _minimumSaveInterval = TimeSpan.FromSeconds(5);
+    private readonly TimeSpan _periodicSaveInterval = TimeSpan.FromSeconds(30);
+    private bool _isRestoringPosition = false;
+    private bool _isLoadingEpisode = false;
+    private bool _isInitializing = true; // Prevent saving during startup
+    private System.Threading.Timer? _debouncedSaveTimer;
+    private readonly TimeSpan _saveDebounceDelay = TimeSpan.FromSeconds(1);
+    private string _lastSaveReason = "unknown";
 
     public DotnetRocksViewModel(DotnetRocksService dotnetRocksService, GoogleDriveService googleDriveService)
     {
@@ -49,6 +63,9 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
         // Set default episode number
         EpisodeNumber = 1001; // Default episode
+
+        // Load playback state on startup
+        _ = LoadPlaybackStateAsync();
     }
 
     public int EpisodeNumber
@@ -56,9 +73,15 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         get => _episodeNumber;
         set
         {
-            _episodeNumber = value;
-            OnPropertyChanged();
-            CheckIfCached();
+            if (_episodeNumber != value)
+            {
+                // Cancel any pending debounced save from the previous episode
+                _debouncedSaveTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+                _episodeNumber = value;
+                OnPropertyChanged();
+                CheckIfCached();
+            }
         }
     }
 
@@ -157,16 +180,6 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool CanDownload
-    {
-        get => _canDownload;
-        set
-        {
-            _canDownload = value;
-            OnPropertyChanged();
-            ((Command)DownloadEpisodeCommand).ChangeCanExecute();
-        }
-    }
 
     public bool IsEpisodeCached
     {
@@ -312,22 +325,40 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     // Media Player Methods
     public void SetMediaElement(MediaElement mediaElement)
     {
+        System.Diagnostics.Debug.WriteLine($"[SetMediaElement] START - EpisodeNum: {EpisodeNumber}, IsRestoring: {_isRestoringPosition}");
+
+        // Since this is only called once, we don't need to check for existing MediaElement
         _mediaElement = mediaElement;
+        System.Diagnostics.Debug.WriteLine($"[SetMediaElement] MediaElement set");
 
-        // Subscribe to MediaEnded event to auto-play next episode
+        // Subscribe to events for tracking and auto-play
         _mediaElement.MediaEnded += OnMediaEnded;
+        _mediaElement.StateChanged += OnMediaStateChanged;
+        _mediaElement.SeekCompleted += OnSeekCompleted;
 
-        // If episode is already cached when MediaElement is set, load it
-        if (IsEpisodeCached)
+        // Only load episode if:
+        // 1. Episode is cached
+        // 2. MediaElement has no source
+        // 3. We haven't already loaded this episode
+        if (IsEpisodeCached && _mediaElement.Source == null)
         {
-            LoadEpisode();
+            System.Diagnostics.Debug.WriteLine($"[SetMediaElement] Will load episode {EpisodeNumber}");
+            _ = LoadEpisode(); // Fire and forget for initial load
         }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[SetMediaElement] Skip load - Cached: {IsEpisodeCached}, Source: {_mediaElement.Source != null}");
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[SetMediaElement] END");
     }
 
     private async void OnMediaEnded(object? sender, EventArgs e)
     {
         try
         {
+            StopPeriodicSaveTimer();
+
             // Add a small delay to avoid COM exceptions on Windows
             await Task.Delay(100);
 
@@ -351,46 +382,189 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
-    private void LoadEpisode(bool autoPlay = false)
+    private void OnMediaStateChanged(object? sender, MediaStateChangedEventArgs e)
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Media state changed: {e.PreviousState} -> {e.NewState}");
+
+            switch (e.NewState)
+            {
+                case MediaElementState.Playing:
+                    // Start periodic save timer when playing
+                    StartPeriodicSaveTimer();
+                    // Request a debounced save when starting
+                    RequestDebouncedSave("playback started");
+                    break;
+
+                case MediaElementState.Paused:
+                    // Only save when paused by user, not during loading
+                    if (e.PreviousState == MediaElementState.Playing)
+                    {
+                        // Request a debounced save when paused from playing
+                        RequestDebouncedSave("playback paused");
+                    }
+                    StopPeriodicSaveTimer();
+                    break;
+
+                case MediaElementState.Stopped:
+                    // Only save when stopped by user, not during loading/restoration
+                    if (e.PreviousState == MediaElementState.Playing || e.PreviousState == MediaElementState.Paused)
+                    {
+                        // But skip if we're loading an episode, restoring, position is 0, or episode not loaded
+                        if (!_isLoadingEpisode && !_isRestoringPosition && _mediaElement?.Position.TotalSeconds > 0)
+                        {
+                            // Request a debounced save when stopped from playing/paused
+                            RequestDebouncedSave("playback stopped");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Skipping save on stop: loading={_isLoadingEpisode}, restoring={_isRestoringPosition}, position={FormatTime(_mediaElement?.Position.TotalSeconds ?? 0)}");
+                        }
+                    }
+                    StopPeriodicSaveTimer();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error handling media state change: {ex.Message}");
+        }
+    }
+
+    private async void OnSeekCompleted(object? sender, EventArgs e)
+    {
+        try
+        {
+            // Skip if we're in the middle of restoring position or loading
+            if (_isRestoringPosition || _isLoadingEpisode)
+            {
+                System.Diagnostics.Debug.WriteLine($"[OnSeekCompleted] Skipping - Restoring: {_isRestoringPosition}, Loading: {_isLoadingEpisode}");
+                return;
+            }
+
+            // Log the immediate position
+            if (_mediaElement != null)
+            {
+                var immediatePos = _mediaElement.Position.TotalSeconds;
+                System.Diagnostics.Debug.WriteLine($"[OnSeekCompleted] Initial position: {FormatTime(immediatePos)}");
+
+                // Wait for position to update or timeout after 1 second
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var maxWaitTime = TimeSpan.FromSeconds(1);
+                var checkInterval = TimeSpan.FromMilliseconds(50);
+
+                double finalPos = immediatePos;
+                while (stopwatch.Elapsed < maxWaitTime)
+                {
+                    await Task.Delay(checkInterval);
+                    var currentPos = _mediaElement.Position.TotalSeconds;
+
+                    // If position changed, we're done waiting
+                    if (Math.Abs(currentPos - immediatePos) > 0.1)
+                    {
+                        finalPos = currentPos;
+                        break;
+                    }
+                    finalPos = currentPos;
+                }
+
+                stopwatch.Stop();
+                System.Diagnostics.Debug.WriteLine($"[OnSeekCompleted] Final position: {FormatTime(finalPos)}, Wait time: {stopwatch.ElapsedMilliseconds}ms");
+
+                if (!_isLoadingEpisode)
+                {
+                    RequestDebouncedSave("seek completed");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error saving state after seek: {ex.Message}");
+        }
+    }
+
+    private async Task LoadEpisode(bool autoPlay = false)
+    {
+        System.Diagnostics.Debug.WriteLine($"[LoadEpisode] START - Episode: {EpisodeNumber}, AutoPlay: {autoPlay}, IsRestoring: {_isRestoringPosition}");
+
+        try
+        {
+            // Check if MediaElement has been set
             if (_mediaElement == null)
             {
-                StatusMessage = "Media player not initialized";
+                System.Diagnostics.Debug.WriteLine($"[LoadEpisode] MediaElement not initialized yet, aborting");
                 return;
             }
 
             var filePath = _dotnetRocksService.GetCachedEpisodePath(EpisodeNumber);
             if (string.IsNullOrEmpty(filePath))
             {
+                System.Diagnostics.Debug.WriteLine($"[LoadEpisode] Episode {EpisodeNumber} not in cache, aborting");
                 StatusMessage = "Episode not found in cache";
                 return;
             }
 
+            System.Diagnostics.Debug.WriteLine($"[LoadEpisode] Found cached file: {filePath}");
+
+            // Set flag to indicate we're loading an episode
+            _isLoadingEpisode = true;
+
             // Ensure we're on the UI thread when modifying MediaElement
-            MainThread.BeginInvokeOnMainThread(async () =>
+            await MainThread.InvokeOnMainThreadAsync(async () =>
             {
                 try
                 {
                     // Stop current playback before changing source
-                    _mediaElement.Stop();
+                    _mediaElement!.Stop();
 
                     // Set the source for the MediaElement
                     _mediaElement.Source = MediaSource.FromFile(filePath);
                     StatusMessage = $"Episode {EpisodeNumber} loaded in player";
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Successfully loaded episode {EpisodeNumber}");
 
-                    // Only auto-play when specifically requested (e.g., after episode ends)
-                    if (autoPlay)
+                    // Check if we should restore position
+                    if (_isRestoringPosition && _lastSavedState != null &&
+                        _lastSavedState.EpisodeNumber == EpisodeNumber &&
+                        _lastSavedState.Position > 0)
                     {
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Restoring position for episode {EpisodeNumber} to {FormatTime(_lastSavedState.Position)}");
+
+                        // Small delay to ensure source is loaded
+                        await Task.Delay(200);
+
+                        // Seek to saved position
+                        var position = TimeSpan.FromSeconds(_lastSavedState.Position);
+                        await _mediaElement.SeekTo(position);
+
+                        StatusMessage = $"Episode {EpisodeNumber} restored to {FormatTime(_lastSavedState.Position)}";
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Position restored successfully");
+
+                        // Play if it was playing before
+                        if (_lastSavedState.IsPlaying)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Auto-playing because state was playing before");
+                            _mediaElement.Play();
+                        }
+
+                        _isRestoringPosition = false;
+                    }
+                    // Only auto-play when specifically requested (e.g., after episode ends)
+                    else if (autoPlay)
+                    {
+                        await SavePlaybackStateAsync(true, "new episode auto play");
                         // Small delay to ensure source is loaded
                         await Task.Delay(100);
                         _mediaElement.Play();
                     }
+
+                    // Clear the loading flag
+                    _isLoadingEpisode = false;
                 }
                 catch (Exception ex)
                 {
                     StatusMessage = $"Failed to load episode: {ex.Message}";
+                    _isLoadingEpisode = false;
                 }
             });
         }
@@ -467,7 +641,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         // Then load it into the player if download succeeded
         if (IsEpisodeCached)
         {
-            LoadEpisode();
+            await LoadEpisode();
         }
     }
 
@@ -479,27 +653,33 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         // Then load it into the player with auto-play if download succeeded
         if (IsEpisodeCached)
         {
-            LoadEpisode(true); // Auto-play when auto-advancing
+            await LoadEpisode(true); // Auto-play when auto-advancing
         }
     }
 
     private async void CheckIfCached()
     {
+        System.Diagnostics.Debug.WriteLine($"[CheckIfCached] Episode: {EpisodeNumber}, IsRestoring: {_isRestoringPosition}");
+
         var cachedPath = _dotnetRocksService.GetCachedEpisodePath(EpisodeNumber);
         IsEpisodeCached = !string.IsNullOrEmpty(cachedPath);
+        System.Diagnostics.Debug.WriteLine($"[CheckIfCached] Episode {EpisodeNumber} cached: {IsEpisodeCached}");
 
         if (IsEpisodeCached)
         {
             DownloadedFilePath = cachedPath ?? string.Empty;
-            // Automatically load the cached episode into the media player
-            // Pass true for autoPlay only if we're auto-advancing from a finished episode
-            LoadEpisode(_isAutoAdvancing);
+
+            // Load the episode (MediaElement is always set at this point)
+            System.Diagnostics.Debug.WriteLine($"[CheckIfCached] Loading episode {EpisodeNumber}");
+            await LoadEpisode(_isAutoAdvancing);
 
             // Reset the flag after use
             _isAutoAdvancing = false;
         }
         else
         {
+            // Episode is not cached
+
             // If auto-advancing and episode is not cached, download and play it
             if (_isAutoAdvancing)
             {
@@ -511,11 +691,8 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             else
             {
                 // Clear MediaElement if the cached episode is removed
-                if (_mediaElement != null)
-                {
-                    _mediaElement.Stop();
-                    _mediaElement.Source = null;
-                }
+                _mediaElement!.Stop();
+                _mediaElement.Source = null;
             }
         }
 
@@ -540,44 +717,13 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             Process.Start("explorer.exe", downloadPath);
             StatusMessage = "Opened downloads folder";
 #elif ANDROID
-            // On Android, share the folder path for file managers to open
-            try
+            // On Android, share the folder path
+            await Share.Default.RequestAsync(new ShareTextRequest
             {
-                // Share the folder path as text that file managers can recognize
-                await Share.Default.RequestAsync(new ShareTextRequest
-                {
-                    Title = "Open Downloads Folder",
-                    Text = downloadPath,
-                    Subject = "Episode Downloads Location"
-                });
-                StatusMessage = "Shared folder path";
-            }
-            catch
-            {
-                // If sharing doesn't work, copy path to clipboard and show message
-                try
-                {
-                    await Clipboard.Default.SetTextAsync(downloadPath);
-                    var window = Application.Current?.Windows.FirstOrDefault();
-                    if (window?.Page != null)
-                    {
-                        await window.Page.DisplayAlert("Path Copied",
-                            $"Downloads folder path copied to clipboard:\n\n{downloadPath}\n\nPaste this in your file manager to navigate to the folder.", "OK");
-                    }
-                    StatusMessage = "Path copied to clipboard";
-                }
-                catch
-                {
-                    // Final fallback - just show the path
-                    var window = Application.Current?.Windows.FirstOrDefault();
-                    if (window?.Page != null)
-                    {
-                        await window.Page.DisplayAlert("Downloads Location",
-                            $"Episodes are saved to:\n{downloadPath}", "OK");
-                    }
-                    StatusMessage = "Downloads path shown";
-                }
-            }
+                Title = "Episode Downloads Path",
+                Text = downloadPath
+            });
+            StatusMessage = "Shared folder path";
 #else
             // For other platforms, try to open with the default handler
             await Launcher.OpenAsync(new OpenFileRequest
@@ -1060,6 +1206,337 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             throw new Exception($"Failed to update meta file: {ex.Message}", ex);
         }
+    }
+
+    // Playback State Management Methods
+    public async Task SaveStateOnBackgroundAsync()
+    {
+        // Public method to save state when app goes to background or navigating away
+        await SavePlaybackStateAsync(force: true, reason: "app backgrounded");
+
+        // Don't stop the periodic timer if media is still playing
+        // (we want to keep saving state while playing in background)
+        if (_mediaElement?.CurrentState != MediaElementState.Playing)
+        {
+            StopPeriodicSaveTimer();
+        }
+    }
+
+    public void PauseIfPlaying()
+    {
+        // Pause playback if currently playing (used when navigating away)
+        if (_mediaElement != null && _mediaElement.CurrentState == MediaElementState.Playing)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Pausing playback when navigating away");
+            _mediaElement.Pause();
+        }
+    }
+
+    private async Task LoadPlaybackStateAsync()
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] START - Episode: {EpisodeNumber}");
+            await _googleDriveService.InitializeAsync();
+
+            // Look for playback state file in dotnetrocks folder
+            const string fileName = "dotnetrocks_playback_state.json";
+            const string folderName = "dotnetrocks";
+
+            var folderQuery = $"name='{folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+            var folders = await _googleDriveService.ListFilesAsync(10, folderQuery);
+            var folder = folders?.FirstOrDefault();
+
+            if (folder == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] No dotnetrocks folder found in Google Drive");
+                return;
+            }
+
+            var fileQuery = $"name='{fileName}' and '{folder.Id}' in parents and trashed=false";
+            var files = await _googleDriveService.ListFilesAsync(10, fileQuery);
+            var stateFile = files?.FirstOrDefault();
+
+            if (stateFile == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] No playback state file found in Google Drive");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Found playback state file, downloading...");
+
+            // Download and parse the state file
+            using var stream = await _googleDriveService.DownloadFileAsync(stateFile.Id);
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+
+            var state = JsonSerializer.Deserialize<PlaybackState>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (state == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to deserialize playback state");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Loaded state: Episode {state.EpisodeNumber}, Position: {state.PositionFormatted}, LastUpdated: {state.LastUpdated}, Device: {state.DeviceName}");
+
+            _lastSavedState = state;
+
+            // Always set the episode number from saved state
+            EpisodeNumber = state.EpisodeNumber;
+            System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Set episode to {state.EpisodeNumber}");
+
+            // If position is 0, just load the episode
+            if (state.Position <= 0)
+            {
+                StatusMessage = $"Loaded episode {state.EpisodeNumber}";
+                System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Episode {state.EpisodeNumber} at position {state.PositionFormatted}");
+                return;
+            }
+
+            // Restore position since it's greater than 0
+            _isRestoringPosition = true;
+            StatusMessage = $"Found previous playback at {FormatTime(state.Position)}";
+            System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Will restore to {FormatTime(state.Position)} when episode loads");
+
+            // If episode is already loaded, restore position now
+            if (_mediaElement!.Source != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Episode already loaded, restoring position now");
+                await MainThread.InvokeOnMainThreadAsync(async () =>
+                {
+                    await Task.Delay(200); // Small delay to ensure media is ready
+                    var position = TimeSpan.FromSeconds(state.Position);
+                    await _mediaElement.SeekTo(position);
+                    System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Position restored to {FormatTime(state.Position)}");
+
+                    if (state.IsPlaying)
+                    {
+                        _mediaElement.Play();
+                        System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Resuming playback");
+                    }
+
+                    // Don't clear _isRestoringPosition here - let OnSeekCompleted clear it
+                });
+            }
+        }
+        catch (Google.GoogleApiException gex) when (gex.Message.Contains("Unauthorized"))
+        {
+            System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Google Drive authentication failed: {gex.Message}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Failed to load playback state: {ex.Message}");
+        }
+        finally
+        {
+            // Mark initialization as complete
+            _isInitializing = false;
+            System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Initialization complete");
+        }
+    }
+
+    private void RequestDebouncedSave(string reason)
+    {
+        // Don't save during initialization
+        if (_isInitializing)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] RequestDebouncedSave ({reason}): Skipping during initialization");
+            return;
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] RequestDebouncedSave ({reason}): Resetting debounce timer");
+
+        // Store the reason for this save
+        _lastSaveReason = reason;
+
+        // Create timer if it doesn't exist
+        _debouncedSaveTimer ??= new System.Threading.Timer(async _ =>
+        {
+            await MainThread.InvokeOnMainThreadAsync(async () =>
+            {
+                await SavePlaybackStateAsync(force: true, reason: $"debounced ({_lastSaveReason})");
+            });
+        }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+        // Reset the timer to fire after the debounce delay
+        _debouncedSaveTimer.Change(_saveDebounceDelay, Timeout.InfiniteTimeSpan);
+    }
+
+    private async Task SavePlaybackStateAsync(bool force = false, string reason = "periodic")
+    {
+        try
+        {
+            // Don't save during initialization
+            if (_isInitializing)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] SavePlaybackStateAsync ({reason}): Skipping save during initialization");
+                return;
+            }
+
+
+            // Check minimum save interval (unless forced)
+            if (!force && (DateTime.Now - _lastSaveTime) < _minimumSaveInterval)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] SavePlaybackStateAsync ({reason}): Too soon since last save, skipping");
+                return;
+            }
+
+            // Check if episode is cached
+            bool isEpisodeCached = !string.IsNullOrEmpty(_dotnetRocksService.GetCachedEpisodePath(EpisodeNumber));
+
+            // If episode is not cached, save with position 0
+            double currentPosition = 0;
+            double currentDuration = 0;
+
+            if (isEpisodeCached && _mediaElement != null)
+            {
+                if (!reason.Contains("new episode"))
+                {
+                    currentPosition = _mediaElement.Position.TotalSeconds;
+                }
+                currentDuration = _mediaElement.Duration.TotalSeconds;
+            }
+
+            var positionFormatted = FormatTime(currentPosition);
+            var durationFormatted = FormatTime(currentDuration);
+            var currentState = _mediaElement?.CurrentState.ToString() ?? "None";
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Preparing to save ({reason}): Position={positionFormatted}, Duration={durationFormatted}, State={currentState}, Cached={isEpisodeCached}");
+
+            // Skip saving during restoration process
+            if (_isRestoringPosition && (reason == "seek completed" || reason == "playback paused"))
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Skipping save ({reason}): Position is being restored");
+                return;
+            }
+
+            int episodeToSave = EpisodeNumber;
+
+            var state = new PlaybackState
+            {
+                EpisodeNumber = episodeToSave,
+                Position = currentPosition,
+                Duration = currentDuration,
+                LastUpdated = DateTime.Now,
+                IsPlaying = _mediaElement?.CurrentState == MediaElementState.Playing,
+                EpisodeTitle = EpisodeTitle,
+                DeviceId = GetDeviceId(),
+                DeviceName = GetDeviceName()
+            };
+
+            // Don't save if nothing has changed significantly
+            if (!force && _lastSavedState != null &&
+                _lastSavedState.EpisodeNumber == state.EpisodeNumber &&
+                Math.Abs(_lastSavedState.Position - state.Position) < 2) // Less than 2 seconds difference
+            {
+                return;
+            }
+
+            // Initialize google drive service
+            await _googleDriveService.InitializeAsync();
+
+            // Ensure dotnetrocks folder exists
+            var folderId = await EnsureDotnetRocksFolderAsync();
+
+            // Convert state to JSON
+            var json = JsonSerializer.Serialize(state, new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+
+            // Check if file exists
+            const string fileName = "dotnetrocks_playback_state.json";
+            var fileQuery = $"name='{fileName}' and '{folderId}' in parents and trashed=false";
+            var files = await _googleDriveService.ListFilesAsync(10, fileQuery);
+            var existingFile = files?.FirstOrDefault();
+
+            if (existingFile != null)
+            {
+                // Update existing file
+                await _googleDriveService.UpdateFileAsync(existingFile.Id, stream, "application/json");
+            }
+            else
+            {
+                // Create new file
+                await _googleDriveService.UploadFileAsync(fileName, stream, "application/json", folderId);
+            }
+
+            _lastSavedState = state;
+            _lastSaveTime = DateTime.Now;
+
+            System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] Saved ({reason}): Episode {state.EpisodeNumber}, Position: {state.PositionFormatted}");
+
+            // Update status bar
+            StatusMessage = $"Saved: Episode {state.EpisodeNumber} at {state.PositionFormatted}";
+        }
+        catch (Google.GoogleApiException gex) when (gex.Message.Contains("Unauthorized"))
+        {
+            System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] Google Drive authentication failed ({reason}): {gex.Message}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] Failed to save ({reason}): {ex.Message}");
+        }
+    }
+
+    private void StartPeriodicSaveTimer()
+    {
+        StopPeriodicSaveTimer();
+
+        _periodicSaveTimer = new System.Threading.Timer(async _ =>
+        {
+            if (_mediaElement?.CurrentState == MediaElementState.Playing)
+            {
+                await MainThread.InvokeOnMainThreadAsync(async () =>
+                {
+                    await SavePlaybackStateAsync();
+                });
+            }
+        }, null, _periodicSaveInterval, _periodicSaveInterval);
+    }
+
+    private void StopPeriodicSaveTimer()
+    {
+        _periodicSaveTimer?.Dispose();
+        _periodicSaveTimer = null;
+    }
+
+    private string GetDeviceId()
+    {
+        // Generate a unique device ID based on platform
+#if ANDROID
+        return Android.Provider.Settings.Secure.GetString(
+            Android.App.Application.Context.ContentResolver,
+            Android.Provider.Settings.Secure.AndroidId) ?? "android-unknown";
+#elif WINDOWS
+        return System.Environment.MachineName;
+#else
+        return "unknown-device";
+#endif
+    }
+
+    private string GetDeviceName()
+    {
+#if ANDROID
+        return $"{Android.OS.Build.Manufacturer} {Android.OS.Build.Model}";
+#elif WINDOWS
+        return System.Environment.MachineName;
+#else
+        return "Unknown Device";
+#endif
+    }
+
+    private string FormatTime(double seconds)
+    {
+        var timeSpan = TimeSpan.FromSeconds(seconds);
+        return timeSpan.TotalHours >= 1
+            ? $"{(int)timeSpan.TotalHours}:{timeSpan.Minutes:D2}:{timeSpan.Seconds:D2}"
+            : $"{timeSpan.Minutes}:{timeSpan.Seconds:D2}";
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

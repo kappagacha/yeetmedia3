@@ -88,14 +88,14 @@
                    Placeholder="Search files..."
                    ReturnType="Search"
                    ReturnCommand="{Binding SearchFilesCommand}"
-                   ReturnCommandParameter="{Binding Text, Source={x:Reference SearchEntry}}"
+                   ReturnCommandParameter="{Binding Source={x:Reference SearchEntry}, Path=Text, x:DataType=Entry}"
                    BackgroundColor="{AppThemeBinding Light=White, Dark=#2A2A2A}"
                    PlaceholderColor="Gray"/>
 
             <Button Grid.Column="1"
                     Text="Search"
                     Command="{Binding SearchFilesCommand}"
-                    CommandParameter="{Binding Text, Source={x:Reference SearchEntry}}"
+                    CommandParameter="{Binding Source={x:Reference SearchEntry}, Path=Text, x:DataType=Entry}"
                     BackgroundColor="#007BFF"
                     TextColor="White"
                     Padding="10,0"/>

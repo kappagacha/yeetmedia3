@@ -231,7 +231,7 @@ public class GoogleAuthService
         }
 
         // Check if token is expired (with 5 minute buffer)
-        if (token.ExpiresAt < DateTime.UtcNow.AddMinutes(-5))
+        if (token.ExpiresAt < DateTime.UtcNow.AddMinutes(-5)) 
         {
             if (!string.IsNullOrEmpty(token.RefreshToken))
             {

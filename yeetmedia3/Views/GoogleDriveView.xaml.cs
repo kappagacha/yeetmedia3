@@ -14,6 +14,18 @@ public partial class GoogleDriveView : ContentPage
         BindingContext = viewModel;
     }
 
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        System.Diagnostics.Debug.WriteLine($"[GoogleDriveView] OnAppearing - Navigating to Google Drive view");
+    }
+
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        System.Diagnostics.Debug.WriteLine($"[GoogleDriveView] OnDisappearing - Leaving Google Drive view");
+    }
+
     private async void OnNewJsonButtonClicked(object sender, EventArgs e)
     {
         try
