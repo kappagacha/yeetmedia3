@@ -520,6 +520,11 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
                     // Set the source for the MediaElement
                     _mediaElement.Source = MediaSource.FromFile(filePath);
+
+                    // Set metadata for media notification (Android)
+                    _mediaElement.MetadataTitle = $"Episode {EpisodeNumber}";
+                    _mediaElement.MetadataArtist = ".NET Rocks! Podcast";
+
                     StatusMessage = $"Episode {EpisodeNumber} loaded in player";
                     System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Successfully loaded episode {EpisodeNumber}");
 
