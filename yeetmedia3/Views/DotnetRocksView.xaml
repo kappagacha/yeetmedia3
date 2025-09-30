@@ -153,20 +153,14 @@
                              HorizontalOptions="Fill"
                              ProgressColor="{AppThemeBinding Light=#FFE4B580, Dark=#5A5A3A80}"
                              BackgroundColor="Transparent"
-                             IsVisible="{Binding IsDownloading}"/>
+                             IsVisible="{Binding IsBusy}"/>
 
                 <!-- Status content on top -->
                 <HorizontalStackLayout Spacing="10"
                                        Padding="10"
                                        BackgroundColor="Transparent">
-                    <ActivityIndicator IsRunning="{Binding IsLoading}"
-                                       IsVisible="{Binding IsLoading}"
-                                       Color="#512BD4"
-                                       WidthRequest="20"
-                                       HeightRequest="20"/>
-
-                    <ActivityIndicator IsRunning="{Binding IsDownloading}"
-                                       IsVisible="{Binding IsDownloading}"
+                    <ActivityIndicator IsRunning="{Binding IsBusy}"
+                                       IsVisible="{Binding IsBusy}"
                                        Color="#4285F4"
                                        WidthRequest="20"
                                        HeightRequest="20"/>
@@ -175,14 +169,6 @@
                            VerticalOptions="Center"
                            FontSize="14"
                            TextColor="{AppThemeBinding Light=#666666, Dark=#CCCCCC}"/>
-
-                    <!-- Download percentage when downloading -->
-                    <Label Text="{Binding DownloadProgressPercent}"
-                           VerticalOptions="Center"
-                           FontSize="14"
-                           FontAttributes="Bold"
-                           TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"
-                           IsVisible="{Binding IsDownloading}"/>
                 </HorizontalStackLayout>
             </Grid>
         </Border>

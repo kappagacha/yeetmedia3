@@ -21,8 +21,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     private string _episodeDescription = string.Empty;
     private string _episodeUrl = string.Empty;
     private DateTime? _episodePublishDate;
-    private bool _isLoading;
-    private bool _isDownloading;
+    private bool _isBusy;
     private double _downloadProgress;
     private string _statusMessage = string.Empty;
     private string _downloadedFilePath = string.Empty;
@@ -57,13 +56,13 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         // Initialize commands
         DownloadEpisodeCommand = new Command(async () =>
         {
-            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download command executed. IsDownloading: {IsDownloading}");
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download command executed. IsBusy: {IsBusy}");
             await DownloadEpisodeAsync();
-        }, () => !IsDownloading);
+        }, () => !IsBusy);
         ShowActionsCommand = new Command(async () => await ShowActionsAsync());
         IncrementEpisodeCommand = new Command(() => EpisodeNumber++);
         DecrementEpisodeCommand = new Command(() => { if (EpisodeNumber > 1) EpisodeNumber--; });
-        PlayEpisodeCommand = new Command(async () => await PlayEpisodeAsync(), () => !IsDownloading && !IsEpisodeCached);
+        PlayEpisodeCommand = new Command(async () => await PlayEpisodeAsync(), () => !IsBusy && !IsEpisodeCached);
 
         // Set default episode number
         EpisodeNumber = 1001; // Default episode
@@ -146,22 +145,12 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool IsLoading
+    public bool IsBusy
     {
-        get => _isLoading;
+        get => _isBusy;
         set
         {
-            _isLoading = value;
-            OnPropertyChanged();
-        }
-    }
-
-    public bool IsDownloading
-    {
-        get => _isDownloading;
-        set
-        {
-            _isDownloading = value;
+            _isBusy = value;
             OnPropertyChanged();
             ((Command)DownloadEpisodeCommand).ChangeCanExecute();
             ((Command)PlayEpisodeCommand).ChangeCanExecute();
@@ -224,105 +213,148 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         try
         {
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Starting download for episode {EpisodeNumber}");
-            IsDownloading = true;
-            IsLoading = true;
+            IsBusy = true;
             DownloadProgress = 0;
-            StatusMessage = $"Getting info for episode {EpisodeNumber}...";
+            StatusMessage = $"Checking for episode {EpisodeNumber}...";
 
-            string? audioUrl = null;
-            string? title = null;
-            string? description = null;
-            DateTime? publishDate = null;
-
-            // First, check if metadata exists in Google Drive
+            // First, check if episode exists in Google Drive
+            bool downloadedFromDrive = false;
             try
             {
-                var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(EpisodeNumber);
-                if (metadata != null)
+                var driveProgress = new Progress<double>(p =>
                 {
-                    audioUrl = metadata.AudioUrl;
-                    title = metadata.Title;
-                    description = metadata.Description;
-                    publishDate = metadata.PublishDate;
-                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Found episode {EpisodeNumber} metadata in Google Drive cache");
+                    DownloadProgress = p;
+                    StatusMessage = $"Downloading from Google Drive: {DownloadProgressPercent}";
+                });
+
+                var filePath = await DownloadEpisodeFromGoogleDriveAsync(EpisodeNumber, driveProgress);
+                if (!string.IsNullOrEmpty(filePath))
+                {
+                    DownloadedFilePath = filePath;
+                    StatusMessage = $"Downloaded from Google Drive: {filePath}";
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded episode {EpisodeNumber} from Google Drive");
+                    _loggingService.Info("Download", $"Downloaded episode {EpisodeNumber} from Google Drive");
+                    downloadedFromDrive = true;
+                    CheckIfCached();
+                    return;
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error checking Google Drive metadata: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error checking Google Drive for episode: {ex.Message}");
             }
 
-            // If no metadata in Google Drive or no audio URL, get from website
-            if (string.IsNullOrEmpty(audioUrl))
+            if (!downloadedFromDrive)
             {
-                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Fetching episode {EpisodeNumber} from website");
-                var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+                StatusMessage = $"Getting info for episode {EpisodeNumber}...";
 
-                title = episode.Title;
-                description = episode.Description;
-                audioUrl = episode.AudioUrl;
-                publishDate = episode.PublishDate;
+                string? audioUrl = null;
+                string? title = null;
+                string? description = null;
+                DateTime? publishDate = null;
 
-                // Save the fetched metadata to Google Drive for future use
-                if (!string.IsNullOrEmpty(audioUrl))
+                // Check if metadata exists in Google Drive
+                try
                 {
-                    try
+                    var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(EpisodeNumber);
+                    if (metadata != null)
                     {
-                        await SaveSingleEpisodeMetadataToGoogleDriveAsync(EpisodeNumber, episode);
-                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Saved episode {EpisodeNumber} metadata to Google Drive cache");
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to save metadata to Google Drive: {ex.Message}");
+                        audioUrl = metadata.AudioUrl;
+                        title = metadata.Title;
+                        description = metadata.Description;
+                        publishDate = metadata.PublishDate;
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Found episode {EpisodeNumber} metadata in Google Drive cache");
                     }
                 }
-            }
-
-            // Update UI with episode info
-            EpisodeTitle = title ?? string.Empty;
-            EpisodeDescription = description ?? string.Empty;
-            EpisodeUrl = audioUrl ?? string.Empty;
-            EpisodePublishDate = publishDate;
-
-            if (string.IsNullOrEmpty(audioUrl))
-            {
-                StatusMessage = $"Could not find download URL for episode {EpisodeNumber}";
-                var window = Application.Current?.Windows.FirstOrDefault();
-                if (window?.Page != null)
+                catch (Exception ex)
                 {
-                    await window.Page.DisplayAlert("Download Error",
-                        $"Could not find audio URL for episode {EpisodeNumber}", "OK");
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error checking Google Drive metadata: {ex.Message}");
                 }
-                return;
-            }
 
-            StatusMessage = $"Downloading episode {EpisodeNumber}...";
-            IsLoading = false;
-
-            // Cache the URL in DotnetRocksService so it doesn't fetch again
-            _dotnetRocksService.CacheEpisodeUrl(EpisodeNumber, audioUrl);
-
-            var lastReportedProgress = -1;
-            var progress = new Progress<double>(p =>
-            {
-                DownloadProgress = p;
-                StatusMessage = $"Downloading: {DownloadProgressPercent}";
-
-                // Only log every 10% to reduce spam
-                var currentProgress = (int)(p * 100);
-                if (currentProgress >= lastReportedProgress + 10)
+                // If no metadata in Google Drive or no audio URL, get from website
+                if (string.IsNullOrEmpty(audioUrl))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download progress: {currentProgress}%");
-                    lastReportedProgress = currentProgress;
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Fetching episode {EpisodeNumber} from website");
+                    var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+
+                    title = episode.Title;
+                    description = episode.Description;
+                    audioUrl = episode.AudioUrl;
+                    publishDate = episode.PublishDate;
+
+                    // Save the fetched metadata to Google Drive for future use
+                    if (!string.IsNullOrEmpty(audioUrl))
+                    {
+                        try
+                        {
+                            await SaveSingleEpisodeMetadataToGoogleDriveAsync(EpisodeNumber, episode);
+                            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Saved episode {EpisodeNumber} metadata to Google Drive cache");
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to save metadata to Google Drive: {ex.Message}");
+                        }
+                    }
                 }
-            });
 
-            var filePath = await _dotnetRocksService.DownloadEpisodeAsync(EpisodeNumber, progress);
+                // Update UI with episode info
+                EpisodeTitle = title ?? string.Empty;
+                EpisodeDescription = description ?? string.Empty;
+                EpisodeUrl = audioUrl ?? string.Empty;
+                EpisodePublishDate = publishDate;
 
-            DownloadedFilePath = filePath;
-            StatusMessage = $"Downloaded successfully to: {filePath}";
-            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded to: {filePath}");
-            CheckIfCached();
+                if (string.IsNullOrEmpty(audioUrl))
+                {
+                    StatusMessage = $"Could not find download URL for episode {EpisodeNumber}";
+                    var window = Application.Current?.Windows.FirstOrDefault();
+                    if (window?.Page != null)
+                    {
+                        await window.Page.DisplayAlert("Download Error",
+                            $"Could not find audio URL for episode {EpisodeNumber}", "OK");
+                    }
+                    return;
+                }
+
+                StatusMessage = $"Downloading episode {EpisodeNumber}...";
+                IsBusy = false;
+
+                // Cache the URL in DotnetRocksService so it doesn't fetch again
+                _dotnetRocksService.CacheEpisodeUrl(EpisodeNumber, audioUrl);
+
+                var lastReportedProgress = -1;
+                var progress = new Progress<double>(p =>
+                {
+                    DownloadProgress = p;
+                    StatusMessage = $"Downloading: {DownloadProgressPercent}";
+
+                    // Only log every 10% to reduce spam
+                    var currentProgress = (int)(p * 100);
+                    if (currentProgress >= lastReportedProgress + 10)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download progress: {currentProgress}%");
+                        lastReportedProgress = currentProgress;
+                    }
+                });
+
+                var filePath = await _dotnetRocksService.DownloadEpisodeAsync(EpisodeNumber, progress);
+
+                DownloadedFilePath = filePath;
+                StatusMessage = $"Downloaded successfully to: {filePath}";
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded to: {filePath}");
+
+#if WINDOWS
+                // On Windows, also save to Google Drive
+                DownloadProgress = 0;
+                var uploadProgress = new Progress<double>(p =>
+                {
+                    DownloadProgress = p;
+                    StatusMessage = $"Uploading to Google Drive: {DownloadProgressPercent}";
+                });
+                await SaveEpisodeToGoogleDriveAsync(EpisodeNumber, filePath, uploadProgress);
+#endif
+
+                CheckIfCached();
+            }
         }
         catch (Exception ex)
         {
@@ -337,8 +369,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
         finally
         {
-            IsDownloading = false;
-            IsLoading = false;
+            IsBusy = false;
             DownloadProgress = 0;
         }
     }
@@ -613,11 +644,16 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 "Choose Action",
                 "Cancel",
                 null,
+                "Download Episode Range",
                 "Open Downloads Folder",
                 "Clear All Cache",
                 "Cache Episode Metadata to Google Drive");
 
-            if (action == "Open Downloads Folder")
+            if (action == "Download Episode Range")
+            {
+                await DownloadEpisodeRangeAsync();
+            }
+            else if (action == "Open Downloads Folder")
             {
                 await OpenDownloadsFolderAsync();
             }
@@ -717,9 +753,12 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             }
             else
             {
-                // Clear MediaElement if the cached episode is removed
-                _mediaElement!.Stop();
-                _mediaElement.Source = null;
+                // Clear MediaElement if the cached episode is removed (only if MediaElement is initialized)
+                if (_mediaElement != null)
+                {
+                    _mediaElement.Stop();
+                    _mediaElement.Source = null;
+                }
             }
         }
 
@@ -822,11 +861,219 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
+    private async Task DownloadEpisodeRangeAsync()
+    {
+        try
+        {
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page == null) return;
+
+            // Ask for start episode number
+            var startStr = await window.Page.DisplayPromptAsync(
+                "Download Episode Range",
+                "Enter starting episode number:",
+                placeholder: "e.g., 1001",
+                initialValue: EpisodeNumber.ToString(),
+                keyboard: Keyboard.Numeric);
+
+            if (string.IsNullOrEmpty(startStr)) return;
+
+            // Ask for end episode number
+            var endStr = await window.Page.DisplayPromptAsync(
+                "Download Episode Range",
+                "Enter ending episode number:",
+                placeholder: "e.g., 1010",
+                initialValue: (int.Parse(startStr) + 9).ToString(),
+                keyboard: Keyboard.Numeric);
+
+            if (string.IsNullOrEmpty(endStr)) return;
+
+            if (!int.TryParse(startStr, out int startEpisode) || !int.TryParse(endStr, out int endEpisode))
+            {
+                StatusMessage = "Invalid episode numbers";
+                return;
+            }
+
+            if (startEpisode > endEpisode)
+            {
+                StatusMessage = "Start episode must be less than or equal to end episode";
+                return;
+            }
+
+            // Process the downloads
+            await ProcessEpisodeDownloadRangeAsync(startEpisode, endEpisode);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to download range: {ex.Message}";
+            _loggingService.Error("DownloadRange", "Failed to download episode range", ex);
+        }
+    }
+
+    private async Task ProcessEpisodeDownloadRangeAsync(int startEpisode, int endEpisode)
+    {
+        try
+        {
+            IsBusy = true;
+
+            int totalEpisodes = endEpisode - startEpisode + 1;
+            int successCount = 0;
+            int failureCount = 0;
+            int skippedCount = 0;
+
+            _loggingService.Info("DownloadRange", $"Starting download range: {startEpisode} to {endEpisode} ({totalEpisodes} episodes)");
+
+            for (int episode = startEpisode; episode <= endEpisode; episode++)
+            {
+                try
+                {
+                    int currentIndex = episode - startEpisode + 1;
+                    StatusMessage = $"Processing episode {episode} ({currentIndex}/{totalEpisodes})...";
+                    _loggingService.Info("DownloadRange", $"Processing episode {episode} ({currentIndex}/{totalEpisodes})");
+
+                    // Check if already cached locally
+                    var cachedPath = _dotnetRocksService.GetCachedEpisodePath(episode);
+                    if (!string.IsNullOrEmpty(cachedPath))
+                    {
+                        _loggingService.Info("DownloadRange", $"Episode {episode} already cached locally, skipping");
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Download the episode
+                    var oldEpisodeNumber = EpisodeNumber;
+                    EpisodeNumber = episode;
+
+                    var progress = new Progress<double>(p =>
+                    {
+                        DownloadProgress = p;
+                        StatusMessage = $"Episode {episode} ({currentIndex}/{totalEpisodes}): {DownloadProgressPercent}";
+                    });
+
+                    await DownloadSingleEpisodeAsync(episode, progress);
+
+                    EpisodeNumber = oldEpisodeNumber;
+                    successCount++;
+                }
+                catch (Exception ex)
+                {
+                    _loggingService.Error("DownloadRange", $"Failed to download episode {episode}", ex);
+                    failureCount++;
+                }
+            }
+
+            var summary = $"Download complete: {successCount} succeeded, {skippedCount} skipped, {failureCount} failed";
+            StatusMessage = summary;
+            _loggingService.Info("DownloadRange", summary);
+
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Download Complete", summary, "OK");
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Range download failed: {ex.Message}";
+            _loggingService.Error("DownloadRange", "Range download failed", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+            DownloadProgress = 0;
+            CheckIfCached();
+        }
+    }
+
+    private async Task DownloadSingleEpisodeAsync(int episodeNumber, IProgress<double> progress)
+    {
+        // First, check if episode exists in Google Drive
+        try
+        {
+            var driveFilePath = await DownloadEpisodeFromGoogleDriveAsync(episodeNumber, progress);
+            if (!string.IsNullOrEmpty(driveFilePath))
+            {
+                System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Downloaded episode {episodeNumber} from Google Drive");
+                _loggingService.Info("DownloadRange", $"Downloaded episode {episodeNumber} from Google Drive");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Error checking Google Drive for episode: {ex.Message}");
+        }
+
+        string? audioUrl = null;
+        string? title = null;
+        string? description = null;
+        DateTime? publishDate = null;
+
+        // Check if metadata exists in Google Drive
+        try
+        {
+            var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(episodeNumber);
+            if (metadata != null)
+            {
+                audioUrl = metadata.AudioUrl;
+                title = metadata.Title;
+                description = metadata.Description;
+                publishDate = metadata.PublishDate;
+                System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Found episode {episodeNumber} metadata in Google Drive cache");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Error checking Google Drive metadata: {ex.Message}");
+        }
+
+        // If no metadata in Google Drive or no audio URL, get from website
+        if (string.IsNullOrEmpty(audioUrl))
+        {
+            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Fetching episode {episodeNumber} from website");
+            var episode = await _dotnetRocksService.GetEpisodeInfoAsync(episodeNumber);
+
+            title = episode.Title;
+            description = episode.Description;
+            audioUrl = episode.AudioUrl;
+            publishDate = episode.PublishDate;
+
+            // Save the fetched metadata to Google Drive for future use
+            if (!string.IsNullOrEmpty(audioUrl))
+            {
+                try
+                {
+                    await SaveSingleEpisodeMetadataToGoogleDriveAsync(episodeNumber, episode);
+                    System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Saved episode {episodeNumber} metadata to Google Drive cache");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Failed to save metadata to Google Drive: {ex.Message}");
+                }
+            }
+        }
+
+        if (string.IsNullOrEmpty(audioUrl))
+        {
+            throw new Exception($"Could not find audio URL for episode {episodeNumber}");
+        }
+
+        // Cache the URL in DotnetRocksService so it doesn't fetch again
+        _dotnetRocksService.CacheEpisodeUrl(episodeNumber, audioUrl);
+
+        // Download the episode
+        var filePath = await _dotnetRocksService.DownloadEpisodeAsync(episodeNumber, progress);
+
+#if WINDOWS
+        // On Windows, also save to Google Drive
+        await SaveEpisodeToGoogleDriveAsync(episodeNumber, filePath, progress);
+#endif
+    }
+
     private async Task ProcessEpisodeMetadataBatchAsync(int startEpisode, int endEpisode)
     {
         try
         {
-            IsLoading = true;
+            IsBusy = true;
             StatusMessage = $"Processing episodes {startEpisode} to {endEpisode}...";
 
             // Group episodes by 100s
@@ -900,7 +1147,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
         finally
         {
-            IsLoading = false;
+            IsBusy = false;
         }
     }
 
@@ -1135,6 +1382,151 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to get metadata from Google Drive: {ex.Message}");
             return null;
+        }
+    }
+
+    private async Task<string?> DownloadEpisodeFromGoogleDriveAsync(int episodeNumber, IProgress<double>? progress = null)
+    {
+        try
+        {
+            // Initialize Google Drive if needed
+            await _googleDriveService.InitializeAsync();
+
+            // Check if authenticated
+            if (!await _googleDriveService.IsAuthenticatedAsync())
+            {
+                return null;
+            }
+
+            // Look for the episodes folder in dotnetrocks
+            const string folderName = "dotnetrocks";
+            var folderQuery = $"name='{folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+            var folders = await _googleDriveService.ListFilesAsync(10, folderQuery);
+            var folder = folders?.FirstOrDefault();
+
+            if (folder == null)
+            {
+                return null;
+            }
+
+            // Look for episodes subfolder
+            var episodesFolderQuery = $"name='episodes' and mimeType='application/vnd.google-apps.folder' and '{folder.Id}' in parents and trashed=false";
+            var episodesFolders = await _googleDriveService.ListFilesAsync(10, episodesFolderQuery);
+            var episodesFolder = episodesFolders?.FirstOrDefault();
+
+            if (episodesFolder == null)
+            {
+                return null;
+            }
+
+            // Look for the specific episode file
+            var fileName = $"dotnetrocks_{episodeNumber}.mp3";
+            var fileQuery = $"name='{fileName}' and '{episodesFolder.Id}' in parents and trashed=false";
+            var files = await _googleDriveService.ListFilesAsync(10, fileQuery);
+            var episodeFile = files?.FirstOrDefault();
+
+            if (episodeFile == null)
+            {
+                return null;
+            }
+
+            // Download the file to local cache
+            var localFolder = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks", "podcasts");
+            Directory.CreateDirectory(localFolder);
+            var localPath = Path.Combine(localFolder, fileName);
+
+            System.Diagnostics.Debug.WriteLine($"[DownloadFromGoogleDrive] Downloading episode {episodeNumber} from Google Drive...");
+            _loggingService.Info("GoogleDrive", $"Downloading episode {episodeNumber} from Google Drive");
+
+            // Create a progress wrapper to update UI
+            var driveProgress = progress != null ? new Progress<double>(p =>
+            {
+                progress.Report(p);
+            }) : null;
+
+            using var stream = await _googleDriveService.DownloadFileAsync(episodeFile.Id, driveProgress);
+            using var fileStream = File.Create(localPath);
+            await stream.CopyToAsync(fileStream);
+
+            System.Diagnostics.Debug.WriteLine($"[DownloadFromGoogleDrive] Successfully downloaded episode {episodeNumber} to {localPath}");
+            _loggingService.Info("GoogleDrive", $"Successfully downloaded episode {episodeNumber} from Google Drive");
+
+            return localPath;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DownloadFromGoogleDrive] Error downloading episode {episodeNumber}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task SaveEpisodeToGoogleDriveAsync(int episodeNumber, string filePath, IProgress<double>? progress = null)
+    {
+        try
+        {
+            // Initialize Google Drive if needed
+            await _googleDriveService.InitializeAsync();
+
+            // Check if authenticated
+            if (!await _googleDriveService.IsAuthenticatedAsync())
+            {
+                System.Diagnostics.Debug.WriteLine($"[SaveToGoogleDrive] Not authenticated, skipping upload");
+                return;
+            }
+
+            // Ensure dotnetrocks folder exists
+            var folderId = await EnsureDotnetRocksFolderAsync();
+
+            // Ensure episodes subfolder exists
+            const string episodesFolderName = "episodes";
+            var episodesFolderQuery = $"name='{episodesFolderName}' and mimeType='application/vnd.google-apps.folder' and '{folderId}' in parents and trashed=false";
+            var episodesFolders = await _googleDriveService.ListFilesAsync(10, episodesFolderQuery);
+            var episodesFolder = episodesFolders?.FirstOrDefault();
+
+            string episodesFolderId;
+            if (episodesFolder == null)
+            {
+                // Create episodes folder
+                episodesFolderId = await _googleDriveService.CreateFolderAsync(episodesFolderName, folderId);
+                System.Diagnostics.Debug.WriteLine($"[SaveToGoogleDrive] Created episodes folder with ID: {episodesFolderId}");
+            }
+            else
+            {
+                episodesFolderId = episodesFolder.Id;
+            }
+
+            // Check if file already exists
+            var fileName = $"dotnetrocks_{episodeNumber}.mp3";
+            var fileQuery = $"name='{fileName}' and '{episodesFolderId}' in parents and trashed=false";
+            var files = await _googleDriveService.ListFilesAsync(10, fileQuery);
+            var existingFile = files?.FirstOrDefault();
+
+            if (existingFile != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[SaveToGoogleDrive] Episode {episodeNumber} already exists in Google Drive, skipping upload");
+                return;
+            }
+
+            // Upload the file
+            System.Diagnostics.Debug.WriteLine($"[SaveToGoogleDrive] Uploading episode {episodeNumber} to Google Drive...");
+            _loggingService.Info("GoogleDrive", $"Uploading episode {episodeNumber} to Google Drive");
+
+            // Create a progress wrapper to update UI
+            var uploadProgress = progress != null ? new Progress<double>(p =>
+            {
+                progress.Report(p);
+            }) : null;
+
+            using var fileStream = File.OpenRead(filePath);
+            var fileId = await _googleDriveService.UploadFileAsync(fileName, fileStream, "audio/mpeg", episodesFolderId, uploadProgress);
+
+            System.Diagnostics.Debug.WriteLine($"[SaveToGoogleDrive] Successfully uploaded episode {episodeNumber} to Google Drive with ID: {fileId}");
+            _loggingService.Info("GoogleDrive", $"Successfully uploaded episode {episodeNumber} to Google Drive");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[SaveToGoogleDrive] Error uploading episode {episodeNumber}: {ex.Message}");
+            _loggingService.Error("GoogleDrive", $"Failed to upload episode {episodeNumber} to Google Drive", ex);
         }
     }
 

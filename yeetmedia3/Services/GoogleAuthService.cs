@@ -233,13 +233,13 @@ public class GoogleAuthService
 
         var now = DateTime.UtcNow;
         var expiresAt = token.ExpiresAt;
-        var bufferTime = now.AddMinutes(-5);
-        var isExpired = expiresAt < bufferTime;
+        var expirationWithBuffer = expiresAt.AddMinutes(-5);
+        var isExpired = now >= expirationWithBuffer;
 
         System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token check:");
         System.Diagnostics.Debug.WriteLine($"  Current UTC time: {now}");
         System.Diagnostics.Debug.WriteLine($"  Token expires at: {expiresAt}");
-        System.Diagnostics.Debug.WriteLine($"  Buffer time (now - 5 min): {bufferTime}");
+        System.Diagnostics.Debug.WriteLine($"  Expiration with buffer (expires - 5 min): {expirationWithBuffer}");
         System.Diagnostics.Debug.WriteLine($"  Is expired: {isExpired}");
         System.Diagnostics.Debug.WriteLine($"  Has refresh token: {!string.IsNullOrEmpty(token.RefreshToken)}");
 

@@ -157,6 +157,11 @@ namespace Yeetmedia3.Services;
 
         public async Task<Stream> DownloadFileAsync(string fileId)
         {
+            return await DownloadFileAsync(fileId, null);
+        }
+
+        public async Task<Stream> DownloadFileAsync(string fileId, IProgress<double>? progress)
+        {
             if (_driveService == null)
             {
                 await InitializeAsync();
@@ -167,17 +172,27 @@ namespace Yeetmedia3.Services;
                 throw new InvalidOperationException("Drive service is not initialized");
             }
 
+            // Get file size first for progress calculation
+            var metadata = await GetFileMetadataAsync(fileId);
+            long? totalSize = metadata.Size;
+
             var request = _driveService.Files.Get(fileId);
             var stream = new MemoryStream();
 
-            request.MediaDownloader.ProgressChanged += (progress) =>
+            request.MediaDownloader.ProgressChanged += (downloadProgress) =>
             {
-                switch (progress.Status)
+                switch (downloadProgress.Status)
                 {
                     case Google.Apis.Download.DownloadStatus.Downloading:
-                        Console.WriteLine($"Downloaded {progress.BytesDownloaded} bytes");
+                        if (progress != null && totalSize.HasValue && totalSize.Value > 0)
+                        {
+                            double percentage = (double)downloadProgress.BytesDownloaded / totalSize.Value;
+                            progress.Report(percentage);
+                        }
+                        Console.WriteLine($"Downloaded {downloadProgress.BytesDownloaded} bytes");
                         break;
                     case Google.Apis.Download.DownloadStatus.Completed:
+                        progress?.Report(1.0);
                         Console.WriteLine("Download complete.");
                         break;
                     case Google.Apis.Download.DownloadStatus.Failed:
@@ -256,6 +271,11 @@ namespace Yeetmedia3.Services;
 
         public async Task<string> UploadFileAsync(string fileName, Stream fileContent, string mimeType, string? parentFolderId = null)
         {
+            return await UploadFileAsync(fileName, fileContent, mimeType, parentFolderId, null);
+        }
+
+        public async Task<string> UploadFileAsync(string fileName, Stream fileContent, string mimeType, string? parentFolderId, IProgress<double>? progress)
+        {
             if (_driveService == null)
             {
                 await InitializeAsync();
@@ -284,6 +304,29 @@ namespace Yeetmedia3.Services;
             FilesResource.CreateMediaUpload request;
             request = _driveService.Files.Create(fileMetadata, fileContent, mimeType);
             request.Fields = "id, name, mimeType, size, modifiedTime, parents, webViewLink";
+
+            // Add progress reporting
+            if (progress != null)
+            {
+                request.ProgressChanged += (uploadProgress) =>
+                {
+                    switch (uploadProgress.Status)
+                    {
+                        case Google.Apis.Upload.UploadStatus.Uploading:
+                            double percentage = (double)uploadProgress.BytesSent / fileContent.Length;
+                            progress.Report(percentage);
+                            Console.WriteLine($"Uploaded {uploadProgress.BytesSent} of {fileContent.Length} bytes");
+                            break;
+                        case Google.Apis.Upload.UploadStatus.Completed:
+                            progress.Report(1.0);
+                            Console.WriteLine("Upload complete.");
+                            break;
+                        case Google.Apis.Upload.UploadStatus.Failed:
+                            Console.WriteLine("Upload failed.");
+                            break;
+                    }
+                };
+            }
 
             var result = await request.UploadAsync();
             if (result.Status == Google.Apis.Upload.UploadStatus.Failed)
