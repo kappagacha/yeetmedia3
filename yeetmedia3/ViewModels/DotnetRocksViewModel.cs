@@ -45,10 +45,14 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     private readonly TimeSpan _saveDebounceDelay = TimeSpan.FromSeconds(1);
     private string _lastSaveReason = "unknown";
 
-    public DotnetRocksViewModel(DotnetRocksService dotnetRocksService, GoogleDriveService googleDriveService)
+    private readonly LoggingService _loggingService;
+    private bool _hasPendingSave = false;
+
+    public DotnetRocksViewModel(DotnetRocksService dotnetRocksService, GoogleDriveService googleDriveService, LoggingService loggingService)
     {
         _dotnetRocksService = dotnetRocksService;
         _googleDriveService = googleDriveService;
+        _loggingService = loggingService;
 
         // Initialize commands
         DownloadEpisodeCommand = new Command(async () =>
@@ -64,8 +68,25 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         // Set default episode number
         EpisodeNumber = 1001; // Default episode
 
+        // Monitor connectivity changes
+        Connectivity.ConnectivityChanged += OnConnectivityChanged;
+
         // Load playback state on startup
         _ = LoadPlaybackStateAsync();
+    }
+
+    private async void OnConnectivityChanged(object? sender, ConnectivityChangedEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Connectivity changed: {e.NetworkAccess}");
+        _loggingService.Info("Connectivity", $"Network access changed to: {e.NetworkAccess}");
+
+        // If we have internet and a pending save, try to save now
+        if (e.NetworkAccess == NetworkAccess.Internet && _hasPendingSave)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Internet restored, retrying pending save");
+            _loggingService.Info("PlaybackState", "Internet restored, retrying pending save");
+            await SavePlaybackStateAsync(force: true, reason: "connectivity restored");
+        }
     }
 
     public int EpisodeNumber
@@ -307,6 +328,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download failed: {ex}");
             StatusMessage = $"Download failed: {ex.Message}";
+            _loggingService.Error("Download", $"Failed to download episode {EpisodeNumber}", ex);
             var window = Application.Current?.Windows.FirstOrDefault();
             if (window?.Page != null)
             {
@@ -1239,43 +1261,91 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
     private async Task LoadPlaybackStateAsync()
     {
+        PlaybackState? state = null;
+        string? json = null;
+
         try
         {
             System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] START - Episode: {EpisodeNumber}");
-            await _googleDriveService.InitializeAsync();
 
-            // Look for playback state file in dotnetrocks folder
-            const string fileName = "dotnetrocks_playback_state.json";
-            const string folderName = "dotnetrocks";
+            // Try loading from Google Drive first if we have internet
+            var networkAccess = Connectivity.Current.NetworkAccess;
+            System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Network access: {networkAccess}");
 
-            var folderQuery = $"name='{folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false";
-            var folders = await _googleDriveService.ListFilesAsync(10, folderQuery);
-            var folder = folders?.FirstOrDefault();
-
-            if (folder == null)
+            if (networkAccess == NetworkAccess.Internet)
             {
-                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] No dotnetrocks folder found in Google Drive");
-                return;
+                // Initialize Google Drive first
+                await _googleDriveService.InitializeAsync();
+
+                var isAuthenticated = await _googleDriveService.IsAuthenticatedAsync();
+                System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Google Drive authenticated: {isAuthenticated}");
+
+                if (isAuthenticated)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Attempting to load from Google Drive");
+
+                // Look for playback state file in dotnetrocks folder
+                const string fileName = "dotnetrocks_playback_state.json";
+                const string folderName = "dotnetrocks";
+
+                var folderQuery = $"name='{folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false";
+                var folders = await _googleDriveService.ListFilesAsync(10, folderQuery);
+                var folder = folders?.FirstOrDefault();
+
+                if (folder != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Found dotnetrocks folder: {folder.Id}");
+                    var fileQuery = $"name='{fileName}' and '{folder.Id}' in parents and trashed=false";
+                    var files = await _googleDriveService.ListFilesAsync(10, fileQuery);
+                    var stateFile = files?.FirstOrDefault();
+
+                    if (stateFile != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Found playback state file in Google Drive, downloading...");
+                        using var stream = await _googleDriveService.DownloadFileAsync(stateFile.Id);
+                        using var reader = new StreamReader(stream);
+                        json = await reader.ReadToEndAsync();
+                        System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Successfully downloaded from Google Drive");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] No playback state file found in Google Drive");
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] No dotnetrocks folder found in Google Drive");
+                }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Skipping Google Drive (not authenticated)");
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Skipping Google Drive (offline)");
             }
 
-            var fileQuery = $"name='{fileName}' and '{folder.Id}' in parents and trashed=false";
-            var files = await _googleDriveService.ListFilesAsync(10, fileQuery);
-            var stateFile = files?.FirstOrDefault();
-
-            if (stateFile == null)
+            // If Google Drive failed or we're offline, try loading from local file
+            if (json == null)
             {
-                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] No playback state file found in Google Drive");
-                return;
+                var localPath = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks", "playback_state.json");
+                if (File.Exists(localPath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Loading from local file");
+                    _loggingService.Info("PlaybackState", "Loading from local backup file");
+                    json = await File.ReadAllTextAsync(localPath);
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] No playback state found (online or offline)");
+                    return;
+                }
             }
 
-            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Found playback state file, downloading...");
-
-            // Download and parse the state file
-            using var stream = await _googleDriveService.DownloadFileAsync(stateFile.Id);
-            using var reader = new StreamReader(stream);
-            var json = await reader.ReadToEndAsync();
-
-            var state = JsonSerializer.Deserialize<PlaybackState>(json, new JsonSerializerOptions
+            // Parse the state file
+            state = JsonSerializer.Deserialize<PlaybackState>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
@@ -1335,6 +1405,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Failed to load playback state: {ex.Message}");
+            _loggingService.Error("PlaybackState", "Failed to load playback state", ex);
         }
         finally
         {
@@ -1440,17 +1511,43 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 return;
             }
 
-            // Initialize google drive service
-            await _googleDriveService.InitializeAsync();
-
-            // Ensure dotnetrocks folder exists
-            var folderId = await EnsureDotnetRocksFolderAsync();
-
             // Convert state to JSON
             var json = JsonSerializer.Serialize(state, new JsonSerializerOptions
             {
                 WriteIndented = true
             });
+
+            // Always save to local file first
+            var localFolder = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks");
+            Directory.CreateDirectory(localFolder);
+            var localPath = Path.Combine(localFolder, "playback_state.json");
+            await File.WriteAllTextAsync(localPath, json);
+
+            // Check internet connectivity
+            var networkAccess = Connectivity.Current.NetworkAccess;
+            if (networkAccess != NetworkAccess.Internet)
+            {
+                System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] No internet connection, saved locally only ({reason})");
+                _loggingService.Warning("PlaybackState", $"No internet connection, saved locally only ({reason})");
+                _hasPendingSave = true;
+                StatusMessage = $"Saved locally (offline): Episode {state.EpisodeNumber} at {state.PositionFormatted}";
+                return;
+            }
+
+            // Check if Google Drive is authenticated
+            if (!await _googleDriveService.IsAuthenticatedAsync())
+            {
+                System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] Google Drive not authenticated, saved locally only ({reason})");
+                _loggingService.Warning("PlaybackState", $"Google Drive not authenticated ({reason})");
+                _hasPendingSave = true;
+                return;
+            }
+
+            // Initialize google drive service
+            await _googleDriveService.InitializeAsync();
+
+            // Ensure dotnetrocks folder exists
+            var folderId = await EnsureDotnetRocksFolderAsync();
 
             using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
 
@@ -1471,10 +1568,16 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 await _googleDriveService.UploadFileAsync(fileName, stream, "application/json", folderId);
             }
 
+            // Successfully saved to Google Drive, clear pending flag
+            _hasPendingSave = false;
+
             _lastSavedState = state;
             _lastSaveTime = DateTime.Now;
 
             System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] Saved ({reason}): Episode {state.EpisodeNumber}, Position: {state.PositionFormatted}");
+
+            // Log the save operation
+            _loggingService.Info("PlaybackState", $"Saved ({reason}): Episode {state.EpisodeNumber} at {state.PositionFormatted}");
 
             // Update status bar
             StatusMessage = $"Saved: Episode {state.EpisodeNumber} at {state.PositionFormatted}";
@@ -1482,10 +1585,12 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         catch (Google.GoogleApiException gex) when (gex.Message.Contains("Unauthorized"))
         {
             System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] Google Drive authentication failed ({reason}): {gex.Message}");
+            _loggingService.Error("PlaybackState", $"Google Drive authentication failed during save ({reason})", gex);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[SavePlaybackState] Failed to save ({reason}): {ex.Message}");
+            _loggingService.Error("PlaybackState", $"Failed to save playback state ({reason})", ex);
         }
     }
 

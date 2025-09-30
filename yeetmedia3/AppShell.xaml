@@ -19,4 +19,10 @@
             Route="GoogleDriveView" />
     </FlyoutItem>
 
+    <FlyoutItem Title="Logs" Icon="dotnet_bot.png">
+        <ShellContent
+            ContentTemplate="{DataTemplate views:LogView}"
+            Route="LogView" />
+    </FlyoutItem>
+
 </Shell>

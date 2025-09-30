@@ -227,20 +227,45 @@ public class GoogleAuthService
 
         if (token == null)
         {
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] GetValidTokenAsync: No saved token found");
             return null;
         }
 
+        var now = DateTime.UtcNow;
+        var expiresAt = token.ExpiresAt;
+        var bufferTime = now.AddMinutes(-5);
+        var isExpired = expiresAt < bufferTime;
+
+        System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token check:");
+        System.Diagnostics.Debug.WriteLine($"  Current UTC time: {now}");
+        System.Diagnostics.Debug.WriteLine($"  Token expires at: {expiresAt}");
+        System.Diagnostics.Debug.WriteLine($"  Buffer time (now - 5 min): {bufferTime}");
+        System.Diagnostics.Debug.WriteLine($"  Is expired: {isExpired}");
+        System.Diagnostics.Debug.WriteLine($"  Has refresh token: {!string.IsNullOrEmpty(token.RefreshToken)}");
+
         // Check if token is expired (with 5 minute buffer)
-        if (token.ExpiresAt < DateTime.UtcNow.AddMinutes(-5)) 
+        if (isExpired)
         {
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token is expired, attempting refresh");
             if (!string.IsNullOrEmpty(token.RefreshToken))
             {
                 // Refresh the token
-                return await RefreshTokenAsync(token.RefreshToken);
+                var refreshedToken = await RefreshTokenAsync(token.RefreshToken);
+                if (refreshedToken != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token refreshed successfully");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token refresh failed");
+                }
+                return refreshedToken;
             }
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] No refresh token available, returning null");
             return null;
         }
 
+        System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token is valid, returning");
         return token;
     }
 

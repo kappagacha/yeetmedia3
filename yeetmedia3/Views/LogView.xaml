@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:Yeetmedia3.ViewModels"
+             xmlns:models="clr-namespace:Yeetmedia3.Models"
+             x:Class="Yeetmedia3.Views.LogView"
+             x:DataType="viewmodels:LogViewModel"
+             Title="Application Logs">
+
+    <Grid RowDefinitions="Auto,*" Padding="10">
+
+        <!-- Header with Clear button -->
+        <HorizontalStackLayout Grid.Row="0" Spacing="10" Margin="0,0,0,10">
+            <Label Text="Application Logs"
+                   FontSize="20"
+                   FontAttributes="Bold"
+                   VerticalOptions="Center"
+                   HorizontalOptions="Start"/>
+
+            <Button Text="Clear Logs"
+                    Command="{Binding ClearLogsCommand}"
+                    BackgroundColor="#DC3545"
+                    TextColor="White"
+                    HorizontalOptions="End"/>
+        </HorizontalStackLayout>
+
+        <!-- Logs List -->
+        <CollectionView Grid.Row="1"
+                        ItemsSource="{Binding Logs}"
+                        SelectionMode="Single"
+                        SelectedItem="{Binding SelectedLog}">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:LogEntry">
+                    <Border Padding="10"
+                            Margin="0,2"
+                            BackgroundColor="{AppThemeBinding Light=#F8F9FA, Dark=#2A2A2A}"
+                            Stroke="{AppThemeBinding Light=#DEE2E6, Dark=#404040}"
+                            StrokeThickness="1">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding CopyLogCommand, Source={RelativeSource AncestorType={x:Type viewmodels:LogViewModel}}}"
+                                                  CommandParameter="{Binding .}"/>
+                        </Border.GestureRecognizers>
+
+                        <VerticalStackLayout Spacing="5">
+                            <!-- Header: Timestamp and Level -->
+                            <HorizontalStackLayout Spacing="10">
+                                <Label Text="{Binding FormattedTimestamp}"
+                                       FontSize="12"
+                                       FontFamily="Courier New"
+                                       TextColor="Gray"/>
+
+                                <Label Text="{Binding Level}"
+                                       FontSize="12"
+                                       FontAttributes="Bold"
+                                       TextColor="{Binding LevelColor}"/>
+
+                                <Label Text="{Binding Category}"
+                                       FontSize="12"
+                                       FontAttributes="Italic"
+                                       TextColor="{AppThemeBinding Light=#6C757D, Dark=#ADB5BD}"/>
+                            </HorizontalStackLayout>
+
+                            <!-- Message -->
+                            <Label Text="{Binding Message}"
+                                   FontSize="14"
+                                   LineBreakMode="WordWrap"
+                                   TextColor="{AppThemeBinding Light=#212529, Dark=#F8F9FA}"/>
+
+                            <!-- Exception (if present) -->
+                            <Label Text="{Binding Exception}"
+                                   FontSize="11"
+                                   FontFamily="Courier New"
+                                   LineBreakMode="WordWrap"
+                                   TextColor="#DC3545"
+                                   IsVisible="{Binding Exception, Converter={StaticResource StringToBoolConverter}}"/>
+                        </VerticalStackLayout>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+
+            <CollectionView.EmptyView>
+                <Label Text="No logs available"
+                       FontSize="16"
+                       TextColor="Gray"
+                       HorizontalOptions="Center"
+                       VerticalOptions="Center"
+                       Margin="0,20"/>
+            </CollectionView.EmptyView>
+        </CollectionView>
+    </Grid>
+</ContentPage>
