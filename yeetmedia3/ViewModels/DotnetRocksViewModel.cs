@@ -210,6 +210,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
     private async Task DownloadEpisodeAsync()
     {
+        var startTime = DateTime.Now;
         try
         {
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Starting download for episode {EpisodeNumber}");
@@ -230,10 +231,11 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 var filePath = await DownloadEpisodeFromGoogleDriveAsync(EpisodeNumber, driveProgress);
                 if (!string.IsNullOrEmpty(filePath))
                 {
+                    var duration = DateTime.Now - startTime;
                     DownloadedFilePath = filePath;
-                    StatusMessage = $"Downloaded from Google Drive: {filePath}";
-                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded episode {EpisodeNumber} from Google Drive");
-                    _loggingService.Info("Download", $"Downloaded episode {EpisodeNumber} from Google Drive");
+                    StatusMessage = $"Downloaded from Google Drive in {duration.TotalSeconds:F1}s";
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded episode {EpisodeNumber} from Google Drive in {duration.TotalSeconds:F1}s");
+                    _loggingService.Info("Download", $"Downloaded episode {EpisodeNumber} from Google Drive in {duration.TotalSeconds:F1}s");
                     downloadedFromDrive = true;
                     CheckIfCached();
                     return;
@@ -338,9 +340,11 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
                 var filePath = await _dotnetRocksService.DownloadEpisodeAsync(EpisodeNumber, progress);
 
+                var duration = DateTime.Now - startTime;
                 DownloadedFilePath = filePath;
-                StatusMessage = $"Downloaded successfully to: {filePath}";
-                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded to: {filePath}");
+                StatusMessage = $"Downloaded from web in {duration.TotalSeconds:F1}s";
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded from {audioUrl} in {duration.TotalSeconds:F1}s to: {filePath}");
+                _loggingService.Info("Download", $"Downloaded episode {EpisodeNumber} from web in {duration.TotalSeconds:F1}s");
 
 #if WINDOWS
                 // On Windows, also save to Google Drive
@@ -350,7 +354,12 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                     DownloadProgress = p;
                     StatusMessage = $"Uploading to Google Drive: {DownloadProgressPercent}";
                 });
+
+                var uploadStart = DateTime.Now;
                 await SaveEpisodeToGoogleDriveAsync(EpisodeNumber, filePath, uploadProgress);
+                var uploadDuration = DateTime.Now - uploadStart;
+                StatusMessage = $"Downloaded in {duration.TotalSeconds:F1}s, uploaded in {uploadDuration.TotalSeconds:F1}s";
+                _loggingService.Info("GoogleDrive", $"Uploaded episode {EpisodeNumber} to Google Drive in {uploadDuration.TotalSeconds:F1}s");
 #endif
 
                 CheckIfCached();
