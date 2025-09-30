@@ -949,10 +949,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                         continue;
                     }
 
-                    // Download the episode
-                    var oldEpisodeNumber = EpisodeNumber;
-                    EpisodeNumber = episode;
-
+                    // Download the episode (without changing current episode)
                     var progress = new Progress<double>(p =>
                     {
                         DownloadProgress = p;
@@ -961,7 +958,6 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
                     await DownloadSingleEpisodeAsync(episode, progress);
 
-                    EpisodeNumber = oldEpisodeNumber;
                     successCount++;
                 }
                 catch (Exception ex)
@@ -990,7 +986,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             IsBusy = false;
             DownloadProgress = 0;
-            CheckIfCached();
+            // Don't call CheckIfCached() here - we're downloading other episodes, not changing the current one
         }
     }
 
