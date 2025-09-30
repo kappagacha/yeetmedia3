@@ -47,6 +47,13 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     private readonly LoggingService _loggingService;
     private bool _hasPendingSave = false;
 
+    // Sleep timer properties
+    private int _sleepTimerMinutes = 0;
+    private bool _isSleepTimerRunning = false;
+    private string _sleepTimerDisplay = string.Empty;
+    private System.Threading.Timer? _sleepTimer;
+    private DateTime _sleepTimerEndTime;
+
     public DotnetRocksViewModel(DotnetRocksService dotnetRocksService, GoogleDriveService googleDriveService, LoggingService loggingService)
     {
         _dotnetRocksService = dotnetRocksService;
@@ -63,6 +70,8 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         IncrementEpisodeCommand = new Command(() => EpisodeNumber++);
         DecrementEpisodeCommand = new Command(() => { if (EpisodeNumber > 1) EpisodeNumber--; });
         PlayEpisodeCommand = new Command(async () => await PlayEpisodeAsync(), () => !IsBusy && !IsEpisodeCached);
+        StartSleepTimerCommand = new Command(StartSleepTimer, () => !IsSleepTimerRunning && SleepTimerMinutes > 0);
+        StopSleepTimerCommand = new Command(StopSleepTimer, () => IsSleepTimerRunning);
 
         // Set default episode number
         EpisodeNumber = 1001; // Default episode
@@ -201,11 +210,46 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
+    public int SleepTimerMinutes
+    {
+        get => _sleepTimerMinutes;
+        set
+        {
+            _sleepTimerMinutes = value;
+            OnPropertyChanged();
+            ((Command)StartSleepTimerCommand).ChangeCanExecute();
+        }
+    }
+
+    public bool IsSleepTimerRunning
+    {
+        get => _isSleepTimerRunning;
+        set
+        {
+            _isSleepTimerRunning = value;
+            OnPropertyChanged();
+            ((Command)StartSleepTimerCommand).ChangeCanExecute();
+            ((Command)StopSleepTimerCommand).ChangeCanExecute();
+        }
+    }
+
+    public string SleepTimerDisplay
+    {
+        get => _sleepTimerDisplay;
+        set
+        {
+            _sleepTimerDisplay = value;
+            OnPropertyChanged();
+        }
+    }
+
     public ICommand DownloadEpisodeCommand { get; }
     public ICommand ShowActionsCommand { get; }
     public ICommand IncrementEpisodeCommand { get; }
     public ICommand DecrementEpisodeCommand { get; }
     public ICommand PlayEpisodeCommand { get; }
+    public ICommand StartSleepTimerCommand { get; }
+    public ICommand StopSleepTimerCommand { get; }
 
 
     private async Task DownloadEpisodeAsync()
@@ -2044,6 +2088,103 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         return timeSpan.TotalHours >= 1
             ? $"{(int)timeSpan.TotalHours}:{timeSpan.Minutes:D2}:{timeSpan.Seconds:D2}"
             : $"{timeSpan.Minutes}:{timeSpan.Seconds:D2}";
+    }
+
+    // Sleep Timer Methods
+    private void StartSleepTimer()
+    {
+        try
+        {
+            // Map picker index to minutes: 0=Off, 1=5min, 2=10min, 3=15min, 4=30min, 5=45min, 6=60min
+            int minutes = SleepTimerMinutes switch
+            {
+                1 => 5,
+                2 => 10,
+                3 => 15,
+                4 => 30,
+                5 => 45,
+                6 => 60,
+                _ => 0
+            };
+
+            if (minutes <= 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[SleepTimer] Invalid minutes selected: {minutes}");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[SleepTimer] Starting sleep timer for {minutes} minutes");
+            _loggingService.Info("SleepTimer", $"Starting sleep timer for {minutes} minutes");
+
+            // Set the end time
+            _sleepTimerEndTime = DateTime.Now.AddMinutes(minutes);
+
+            // Create timer that ticks every second
+            _sleepTimer = new System.Threading.Timer(_ =>
+            {
+                MainThread.BeginInvokeOnMainThread(() =>
+                {
+                    var remaining = _sleepTimerEndTime - DateTime.Now;
+
+                    if (remaining.TotalSeconds <= 0)
+                    {
+                        // Timer expired
+                        System.Diagnostics.Debug.WriteLine($"[SleepTimer] Timer expired, pausing playback");
+                        _loggingService.Info("SleepTimer", "Timer expired, pausing playback");
+
+                        // Pause the media element
+                        if (_mediaElement != null && _mediaElement.CurrentState == MediaElementState.Playing)
+                        {
+                            _mediaElement.Pause();
+                        }
+
+                        // Stop the timer
+                        StopSleepTimer();
+
+                        // Show notification
+                        StatusMessage = "Sleep timer expired, playback paused";
+                    }
+                    else
+                    {
+                        // Update display with remaining time
+                        SleepTimerDisplay = $"{(int)remaining.TotalMinutes}:{remaining.Seconds:D2}";
+                    }
+                });
+            }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+
+            IsSleepTimerRunning = true;
+            StatusMessage = $"Sleep timer started for {minutes} minutes";
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[SleepTimer] Error starting sleep timer: {ex.Message}");
+            _loggingService.Error("SleepTimer", "Failed to start sleep timer", ex);
+            StatusMessage = "Failed to start sleep timer";
+        }
+    }
+
+    private void StopSleepTimer()
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"[SleepTimer] Stopping sleep timer");
+            _loggingService.Info("SleepTimer", "Stopping sleep timer");
+
+            // Dispose the timer
+            _sleepTimer?.Dispose();
+            _sleepTimer = null;
+
+            // Reset state
+            IsSleepTimerRunning = false;
+            SleepTimerDisplay = string.Empty;
+
+            StatusMessage = "Sleep timer stopped";
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[SleepTimer] Error stopping sleep timer: {ex.Message}");
+            _loggingService.Error("SleepTimer", "Failed to stop sleep timer", ex);
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

@@ -7,22 +7,28 @@
     xmlns:views="clr-namespace:Yeetmedia3.Views"
     Title="YeetMedia3">
 
-    <FlyoutItem Title=".NET Rocks" Icon="dotnet_bot.png">
+    <FlyoutItem Title="🎙️ .NET Rocks">
         <ShellContent
             ContentTemplate="{DataTemplate views:DotnetRocksView}"
             Route="DotnetRocksView" />
     </FlyoutItem>
 
-    <FlyoutItem Title="Google Drive" Icon="dotnet_bot.png">
+    <FlyoutItem Title="☁️ Google Drive">
         <ShellContent
             ContentTemplate="{DataTemplate views:GoogleDriveView}"
             Route="GoogleDriveView" />
     </FlyoutItem>
 
-    <FlyoutItem Title="Logs" Icon="dotnet_bot.png">
+    <FlyoutItem Title="📋 Logs">
         <ShellContent
             ContentTemplate="{DataTemplate views:LogView}"
             Route="LogView" />
+    </FlyoutItem>
+
+    <FlyoutItem Title="📁 File Explorer">
+        <ShellContent
+            ContentTemplate="{DataTemplate views:FileExplorerView}"
+            Route="FileExplorerView" />
     </FlyoutItem>
 
 </Shell>

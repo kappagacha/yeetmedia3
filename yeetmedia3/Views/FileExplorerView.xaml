@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:Yeetmedia3.ViewModels"
+             xmlns:models="clr-namespace:Yeetmedia3.Models"
+             x:Class="Yeetmedia3.Views.FileExplorerView"
+             x:DataType="viewmodels:FileExplorerViewModel"
+             Title="File Explorer">
+
+    <Grid RowDefinitions="Auto,Auto,*" Padding="10">
+
+        <!-- Header -->
+        <Label Grid.Row="0"
+               Text="File Explorer"
+               FontSize="24"
+               FontAttributes="Bold"
+               HorizontalOptions="Center"
+               TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"
+               Margin="0,0,0,10"/>
+
+        <!-- Navigation Bar -->
+        <Grid Grid.Row="1"
+              ColumnDefinitions="Auto,*"
+              Margin="0,0,0,10">
+
+            <!-- Up/Back Button -->
+            <Button Grid.Column="0"
+                    Text="⬆ Up"
+                    Command="{Binding NavigateUpCommand}"
+                    IsEnabled="{Binding CanNavigateUp}"
+                    BackgroundColor="{AppThemeBinding Light=#6C757D, Dark=#5A6268}"
+                    TextColor="White"
+                    Margin="0,0,10,0"
+                    Padding="15,5"/>
+
+            <!-- Current Path Display -->
+            <Border Grid.Column="1"
+                    BackgroundColor="{AppThemeBinding Light=#F8F8F8, Dark=#2A2A2A}"
+                    Stroke="{AppThemeBinding Light=#DEE2E6, Dark=#404040}"
+                    StrokeThickness="1"
+                    Padding="10">
+                <Label Text="{Binding CurrentPath}"
+                       FontSize="12"
+                       FontFamily="Courier New"
+                       VerticalOptions="Center"
+                       LineBreakMode="TailTruncation"
+                       TextColor="{AppThemeBinding Light=#333333, Dark=#CCCCCC}"/>
+            </Border>
+        </Grid>
+
+        <!-- File/Folder List -->
+        <CollectionView Grid.Row="2"
+                        x:Name="ItemsCollectionView"
+                        ItemsSource="{Binding Items}"
+                        SelectionMode="Single"
+                        SelectionChanged="OnItemSelected">
+
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:FileSystemItem">
+                    <Border Padding="10"
+                            Margin="0,2"
+                            BackgroundColor="{AppThemeBinding Light=#F8F9FA, Dark=#2A2A2A}"
+                            Stroke="{AppThemeBinding Light=#DEE2E6, Dark=#404040}"
+                            StrokeThickness="1">
+
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+
+                            <!-- Icon -->
+                            <Label Grid.Column="0"
+                                   Text="{Binding Icon}"
+                                   FontSize="24"
+                                   VerticalOptions="Center"/>
+
+                            <!-- Name -->
+                            <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
+                                <Label Text="{Binding Name}"
+                                       FontSize="14"
+                                       FontAttributes="Bold"
+                                       TextColor="{AppThemeBinding Light=#212529, Dark=#F8F9FA}"
+                                       LineBreakMode="TailTruncation"/>
+
+                                <Label Text="{Binding LastModifiedFormatted}"
+                                       FontSize="11"
+                                       TextColor="Gray"/>
+                            </VerticalStackLayout>
+
+                            <!-- Size -->
+                            <Label Grid.Column="2"
+                                   Text="{Binding SizeFormatted}"
+                                   FontSize="12"
+                                   TextColor="Gray"
+                                   VerticalOptions="Center"
+                                   HorizontalOptions="End"
+                                   MinimumWidthRequest="80"/>
+
+                            <!-- Directory Indicator -->
+                            <Label Grid.Column="3"
+                                   Text="▶"
+                                   FontSize="16"
+                                   TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"
+                                   VerticalOptions="Center"
+                                   IsVisible="{Binding IsDirectory}"/>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+
+            <CollectionView.EmptyView>
+                <Label Text="No files or folders"
+                       FontSize="16"
+                       TextColor="Gray"
+                       HorizontalOptions="Center"
+                       VerticalOptions="Center"
+                       Margin="0,20"/>
+            </CollectionView.EmptyView>
+        </CollectionView>
+    </Grid>
+</ContentPage>

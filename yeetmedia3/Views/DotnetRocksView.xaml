@@ -7,7 +7,7 @@
              x:DataType="viewmodels:DotnetRocksViewModel"
              Title=".NET Rocks! Podcast">
 
-    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Padding="10">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Padding="10">
 
         <!-- Header -->
         <Label Grid.Row="0"
@@ -70,8 +70,56 @@
                     ToolTipProperties.Text="More Actions"/>
         </Grid>
 
+        <!-- Sleep Timer Row -->
+        <HorizontalStackLayout Grid.Row="2"
+                               Spacing="5"
+                               Margin="0,0,0,10"
+                               HorizontalOptions="Center">
+            <Label Text="Sleep Timer:"
+                   VerticalOptions="Center"
+                   FontSize="14"/>
+
+            <Picker x:Name="SleepTimerPicker"
+                    SelectedIndex="{Binding SleepTimerMinutes}"
+                    FontSize="14"
+                    WidthRequest="80">
+                <Picker.Items>
+                    <x:String>Off</x:String>
+                    <x:String>5 min</x:String>
+                    <x:String>10 min</x:String>
+                    <x:String>15 min</x:String>
+                    <x:String>30 min</x:String>
+                    <x:String>45 min</x:String>
+                    <x:String>60 min</x:String>
+                </Picker.Items>
+            </Picker>
+
+            <Button Text="Start"
+                    Command="{Binding StartSleepTimerCommand}"
+                    BackgroundColor="{AppThemeBinding Light=#28A745, Dark=#20C940}"
+                    TextColor="White"
+                    FontSize="14"
+                    Padding="10,5"
+                    IsVisible="{Binding IsSleepTimerRunning, Converter={StaticResource InverseBoolConverter}}"/>
+
+            <Button Text="Stop"
+                    Command="{Binding StopSleepTimerCommand}"
+                    BackgroundColor="{AppThemeBinding Light=#DC3545, Dark=#C82333}"
+                    TextColor="White"
+                    FontSize="14"
+                    Padding="10,5"
+                    IsVisible="{Binding IsSleepTimerRunning}"/>
+
+            <Label Text="{Binding SleepTimerDisplay}"
+                   VerticalOptions="Center"
+                   FontSize="14"
+                   FontAttributes="Bold"
+                   TextColor="{AppThemeBinding Light=#512BD4, Dark=#9D71FF}"
+                   IsVisible="{Binding IsSleepTimerRunning}"/>
+        </HorizontalStackLayout>
+
         <!-- Episode Info Section -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 BackgroundColor="{AppThemeBinding Light=#F0F8FF, Dark=#1A2332}"
                 Stroke="{AppThemeBinding Light=#B0D4FF, Dark=#2E4E7E}"
                 StrokeThickness="1"
@@ -115,7 +163,7 @@
 
         <!-- MediaElement for audio/video playback -->
         <toolkit:MediaElement x:Name="MediaPlayer"
-                              Grid.Row="3"
+                              Grid.Row="4"
                               IsVisible="{Binding IsEpisodeCached}"
                               ShouldAutoPlay="False"
                               ShouldShowPlaybackControls="True"
@@ -125,7 +173,7 @@
                               Margin="0,5,0,5" />
 
         <!-- Download Button when no episode is cached -->
-        <Button Grid.Row="3"
+        <Button Grid.Row="4"
                 IsVisible="{Binding IsEpisodeCached, Converter={StaticResource InverseBoolConverter}}"
                 Text="⬇"
                 Command="{Binding PlayEpisodeCommand}"
@@ -140,7 +188,7 @@
                 ToolTipProperties.Text="Download and Play Episode"/>
 
         <!-- Status/Loading Section with Progress Bar Background -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 BackgroundColor="{AppThemeBinding Light=#FFF9E6, Dark=#3A3A2A}"
                 Stroke="{AppThemeBinding Light=#FFE4B5, Dark=#5A5A3A}"
                 StrokeThickness="1"

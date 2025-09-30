@@ -30,11 +30,13 @@ public static class MauiProgram
         builder.Services.AddSingleton<GoogleDriveViewModel>();
         builder.Services.AddSingleton<DotnetRocksViewModel>();
         builder.Services.AddSingleton<LogViewModel>();
+        builder.Services.AddSingleton<FileExplorerViewModel>();
 
         // Register Views as Singleton to prevent recreation
         builder.Services.AddSingleton<GoogleDriveView>();
         builder.Services.AddSingleton<DotnetRocksView>();
         builder.Services.AddSingleton<LogView>();
+        builder.Services.AddSingleton<FileExplorerView>();
 
 #if DEBUG
     	builder.Logging.AddDebug();
