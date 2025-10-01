@@ -209,6 +209,12 @@ public class GoogleAuthService
             throw new Exception("Failed to deserialize refresh token response");
         }
 
+        // Preserve the refresh token (Google doesn't return it again in refresh response)
+        if (string.IsNullOrEmpty(token.RefreshToken))
+        {
+            token.RefreshToken = refreshToken;
+        }
+
         // Update the saved token
         await SaveTokenAsync(token);
 
@@ -348,21 +354,6 @@ public class GoogleAuthService
         // Clear the saved token
         SecureStorage.Default.Remove("google_auth_token");
 #endif
-
-        // Clear any WebAuthenticator cached sessions (for all platforms)
-        try
-        {
-            await WebAuthenticator.Default.AuthenticateAsync(
-                new WebAuthenticatorOptions
-                {
-                    Url = new Uri($"{AuthorizationEndpoint}?prompt=none"),
-                    CallbackUrl = new Uri(_redirectUri)
-                });
-        }
-        catch
-        {
-            // This will fail, but it clears the session
-        }
 
         // Clear all cached data in app data directory
         try
