@@ -260,154 +260,70 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Starting download for episode {EpisodeNumber}");
             IsBusy = true;
             DownloadProgress = 0;
-            StatusMessage = $"Checking for episode {EpisodeNumber}...";
+            StatusMessage = $"Getting info for episode {EpisodeNumber}...";
 
-            // First, check if episode exists in Google Drive
-            bool downloadedFromDrive = false;
-            try
+            string? audioUrl = null;
+            string? title = null;
+            string? description = null;
+            DateTime? publishDate = null;
+
+            // Get episode info from website
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Fetching episode {EpisodeNumber} from website");
+            var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+
+            title = episode.Title;
+            description = episode.Description;
+            audioUrl = episode.AudioUrl;
+            publishDate = episode.PublishDate;
+
+            // Update UI with episode info
+            EpisodeTitle = title ?? string.Empty;
+            EpisodeDescription = description ?? string.Empty;
+            EpisodeUrl = audioUrl ?? string.Empty;
+            EpisodePublishDate = publishDate;
+
+            if (string.IsNullOrEmpty(audioUrl))
             {
-                var driveProgress = new Progress<double>(p =>
+                StatusMessage = $"Could not find download URL for episode {EpisodeNumber}";
+                var window = Application.Current?.Windows.FirstOrDefault();
+                if (window?.Page != null)
                 {
-                    DownloadProgress = p;
-                    StatusMessage = $"Downloading from Google Drive: {DownloadProgressPercent}";
-                });
-
-                var filePath = await DownloadEpisodeFromGoogleDriveAsync(EpisodeNumber, driveProgress);
-                if (!string.IsNullOrEmpty(filePath))
-                {
-                    var duration = DateTime.Now - startTime;
-                    DownloadedFilePath = filePath;
-                    StatusMessage = $"Downloaded from Google Drive in {duration.TotalSeconds:F1}s";
-                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded episode {EpisodeNumber} from Google Drive in {duration.TotalSeconds:F1}s");
-                    _loggingService.Info("Download", $"Downloaded episode {EpisodeNumber} from Google Drive in {duration.TotalSeconds:F1}s");
-                    downloadedFromDrive = true;
-                    CheckIfCached();
-                    return;
+                    await window.Page.DisplayAlert("Download Error",
+                        $"Could not find audio URL for episode {EpisodeNumber}", "OK");
                 }
+                return;
             }
-            catch (Exception ex)
+
+            StatusMessage = $"Downloading episode {EpisodeNumber}...";
+            IsBusy = false;
+
+            // Cache the URL in DotnetRocksService so it doesn't fetch again
+            _dotnetRocksService.CacheEpisodeUrl(EpisodeNumber, audioUrl);
+
+            var lastReportedProgress = -1;
+            var progress = new Progress<double>(p =>
             {
-                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error checking Google Drive for episode: {ex.Message}");
-            }
+                DownloadProgress = p;
+                StatusMessage = $"Downloading: {DownloadProgressPercent}";
 
-            if (!downloadedFromDrive)
-            {
-                StatusMessage = $"Getting info for episode {EpisodeNumber}...";
-
-                string? audioUrl = null;
-                string? title = null;
-                string? description = null;
-                DateTime? publishDate = null;
-
-                // Check if metadata exists in Google Drive
-                try
+                // Only log every 10% to reduce spam
+                var currentProgress = (int)(p * 100);
+                if (currentProgress >= lastReportedProgress + 10)
                 {
-                    var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(EpisodeNumber);
-                    if (metadata != null)
-                    {
-                        audioUrl = metadata.AudioUrl;
-                        title = metadata.Title;
-                        description = metadata.Description;
-                        publishDate = metadata.PublishDate;
-                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Found episode {EpisodeNumber} metadata in Google Drive cache");
-                    }
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download progress: {currentProgress}%");
+                    lastReportedProgress = currentProgress;
                 }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error checking Google Drive metadata: {ex.Message}");
-                }
+            });
 
-                // If no metadata in Google Drive or no audio URL, get from website
-                if (string.IsNullOrEmpty(audioUrl))
-                {
-                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Fetching episode {EpisodeNumber} from website");
-                    var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+            var filePath = await _dotnetRocksService.DownloadEpisodeAsync(EpisodeNumber, progress);
 
-                    title = episode.Title;
-                    description = episode.Description;
-                    audioUrl = episode.AudioUrl;
-                    publishDate = episode.PublishDate;
+            var duration = DateTime.Now - startTime;
+            DownloadedFilePath = filePath;
+            StatusMessage = $"Downloaded in {duration.TotalSeconds:F1}s";
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded from {audioUrl} in {duration.TotalSeconds:F1}s to: {filePath}");
+            _loggingService.Info("Download", $"Downloaded episode {EpisodeNumber} in {duration.TotalSeconds:F1}s");
 
-                    // Save the fetched metadata to Google Drive for future use
-                    if (!string.IsNullOrEmpty(audioUrl))
-                    {
-                        try
-                        {
-                            await SaveSingleEpisodeMetadataToGoogleDriveAsync(EpisodeNumber, episode);
-                            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Saved episode {EpisodeNumber} metadata to Google Drive cache");
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to save metadata to Google Drive: {ex.Message}");
-                        }
-                    }
-                }
-
-                // Update UI with episode info
-                EpisodeTitle = title ?? string.Empty;
-                EpisodeDescription = description ?? string.Empty;
-                EpisodeUrl = audioUrl ?? string.Empty;
-                EpisodePublishDate = publishDate;
-
-                if (string.IsNullOrEmpty(audioUrl))
-                {
-                    StatusMessage = $"Could not find download URL for episode {EpisodeNumber}";
-                    var window = Application.Current?.Windows.FirstOrDefault();
-                    if (window?.Page != null)
-                    {
-                        await window.Page.DisplayAlert("Download Error",
-                            $"Could not find audio URL for episode {EpisodeNumber}", "OK");
-                    }
-                    return;
-                }
-
-                StatusMessage = $"Downloading episode {EpisodeNumber}...";
-                IsBusy = false;
-
-                // Cache the URL in DotnetRocksService so it doesn't fetch again
-                _dotnetRocksService.CacheEpisodeUrl(EpisodeNumber, audioUrl);
-
-                var lastReportedProgress = -1;
-                var progress = new Progress<double>(p =>
-                {
-                    DownloadProgress = p;
-                    StatusMessage = $"Downloading: {DownloadProgressPercent}";
-
-                    // Only log every 10% to reduce spam
-                    var currentProgress = (int)(p * 100);
-                    if (currentProgress >= lastReportedProgress + 10)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Download progress: {currentProgress}%");
-                        lastReportedProgress = currentProgress;
-                    }
-                });
-
-                var filePath = await _dotnetRocksService.DownloadEpisodeAsync(EpisodeNumber, progress);
-
-                var duration = DateTime.Now - startTime;
-                DownloadedFilePath = filePath;
-                StatusMessage = $"Downloaded from web in {duration.TotalSeconds:F1}s";
-                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Downloaded from {audioUrl} in {duration.TotalSeconds:F1}s to: {filePath}");
-                _loggingService.Info("Download", $"Downloaded episode {EpisodeNumber} from web in {duration.TotalSeconds:F1}s");
-
-#if WINDOWS
-                // On Windows, also save to Google Drive
-                DownloadProgress = 0;
-                var uploadProgress = new Progress<double>(p =>
-                {
-                    DownloadProgress = p;
-                    StatusMessage = $"Uploading to Google Drive: {DownloadProgressPercent}";
-                });
-
-                var uploadStart = DateTime.Now;
-                await SaveEpisodeToGoogleDriveAsync(EpisodeNumber, filePath, uploadProgress);
-                var uploadDuration = DateTime.Now - uploadStart;
-                StatusMessage = $"Downloaded in {duration.TotalSeconds:F1}s, uploaded in {uploadDuration.TotalSeconds:F1}s";
-                _loggingService.Info("GoogleDrive", $"Uploaded episode {EpisodeNumber} to Google Drive in {uploadDuration.TotalSeconds:F1}s");
-#endif
-
-                CheckIfCached();
-            }
+            CheckIfCached();
         }
         catch (Exception ex)
         {
@@ -1036,70 +952,11 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
     private async Task DownloadSingleEpisodeAsync(int episodeNumber, IProgress<double> progress)
     {
-        // First, check if episode exists in Google Drive
-        try
-        {
-            var driveFilePath = await DownloadEpisodeFromGoogleDriveAsync(episodeNumber, progress);
-            if (!string.IsNullOrEmpty(driveFilePath))
-            {
-                System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Downloaded episode {episodeNumber} from Google Drive");
-                _loggingService.Info("DownloadRange", $"Downloaded episode {episodeNumber} from Google Drive");
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Error checking Google Drive for episode: {ex.Message}");
-        }
+        // Get episode info from website
+        System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Fetching episode {episodeNumber} from website");
+        var episode = await _dotnetRocksService.GetEpisodeInfoAsync(episodeNumber);
 
-        string? audioUrl = null;
-        string? title = null;
-        string? description = null;
-        DateTime? publishDate = null;
-
-        // Check if metadata exists in Google Drive
-        try
-        {
-            var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(episodeNumber);
-            if (metadata != null)
-            {
-                audioUrl = metadata.AudioUrl;
-                title = metadata.Title;
-                description = metadata.Description;
-                publishDate = metadata.PublishDate;
-                System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Found episode {episodeNumber} metadata in Google Drive cache");
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Error checking Google Drive metadata: {ex.Message}");
-        }
-
-        // If no metadata in Google Drive or no audio URL, get from website
-        if (string.IsNullOrEmpty(audioUrl))
-        {
-            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Fetching episode {episodeNumber} from website");
-            var episode = await _dotnetRocksService.GetEpisodeInfoAsync(episodeNumber);
-
-            title = episode.Title;
-            description = episode.Description;
-            audioUrl = episode.AudioUrl;
-            publishDate = episode.PublishDate;
-
-            // Save the fetched metadata to Google Drive for future use
-            if (!string.IsNullOrEmpty(audioUrl))
-            {
-                try
-                {
-                    await SaveSingleEpisodeMetadataToGoogleDriveAsync(episodeNumber, episode);
-                    System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Saved episode {episodeNumber} metadata to Google Drive cache");
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Failed to save metadata to Google Drive: {ex.Message}");
-                }
-            }
-        }
+        var audioUrl = episode.AudioUrl;
 
         if (string.IsNullOrEmpty(audioUrl))
         {
@@ -1111,11 +968,6 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
         // Download the episode
         var filePath = await _dotnetRocksService.DownloadEpisodeAsync(episodeNumber, progress);
-
-#if WINDOWS
-        // On Windows, also save to Google Drive
-        await SaveEpisodeToGoogleDriveAsync(episodeNumber, filePath, progress);
-#endif
     }
 
     private async Task ProcessEpisodeMetadataBatchAsync(int startEpisode, int endEpisode)
