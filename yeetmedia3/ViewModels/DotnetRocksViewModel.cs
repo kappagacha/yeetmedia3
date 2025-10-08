@@ -267,14 +267,49 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             string? description = null;
             DateTime? publishDate = null;
 
-            // Get episode info from website
-            System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Fetching episode {EpisodeNumber} from website");
-            var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+            // Check if metadata exists in Google Drive cache
+            try
+            {
+                var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(EpisodeNumber);
+                if (metadata != null)
+                {
+                    audioUrl = metadata.AudioUrl;
+                    title = metadata.Title;
+                    description = metadata.Description;
+                    publishDate = metadata.PublishDate;
+                    System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Found episode {EpisodeNumber} metadata in Google Drive cache");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Error checking Google Drive metadata: {ex.Message}");
+            }
 
-            title = episode.Title;
-            description = episode.Description;
-            audioUrl = episode.AudioUrl;
-            publishDate = episode.PublishDate;
+            // If no metadata in Google Drive or no audio URL, get from website
+            if (string.IsNullOrEmpty(audioUrl))
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Fetching episode {EpisodeNumber} from website");
+                var episode = await _dotnetRocksService.GetEpisodeInfoAsync(EpisodeNumber);
+
+                title = episode.Title;
+                description = episode.Description;
+                audioUrl = episode.AudioUrl;
+                publishDate = episode.PublishDate;
+
+                // Save the fetched metadata to Google Drive for future use
+                if (!string.IsNullOrEmpty(audioUrl))
+                {
+                    try
+                    {
+                        await SaveSingleEpisodeMetadataToGoogleDriveAsync(EpisodeNumber, episode);
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Saved episode {EpisodeNumber} metadata to Google Drive cache");
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Failed to save metadata to Google Drive: {ex.Message}");
+                    }
+                }
+            }
 
             // Update UI with episode info
             EpisodeTitle = title ?? string.Empty;
@@ -747,7 +782,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     {
         try
         {
-            var downloadPath = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks", "podcasts");
+            var downloadPath = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks", "podcasts");
 
             // Ensure the directory exists
             if (!Directory.Exists(downloadPath))
@@ -780,7 +815,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         {
             StatusMessage = $"Could not open folder: {ex.Message}";
             // Show the path as a fallback
-            var downloadPath = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks", "podcasts");
+            var downloadPath = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks", "podcasts");
             var window = Application.Current?.Windows.FirstOrDefault();
             if (window?.Page != null)
             {
@@ -960,11 +995,54 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
 
     private async Task DownloadSingleEpisodeAsync(int episodeNumber, IProgress<double> progress)
     {
-        // Get episode info from website
-        System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Fetching episode {episodeNumber} from website");
-        var episode = await _dotnetRocksService.GetEpisodeInfoAsync(episodeNumber);
+        string? audioUrl = null;
+        string? title = null;
+        string? description = null;
+        DateTime? publishDate = null;
 
-        var audioUrl = episode.AudioUrl;
+        // Check if metadata exists in Google Drive cache
+        try
+        {
+            var metadata = await GetEpisodeMetadataFromGoogleDriveAsync(episodeNumber);
+            if (metadata != null)
+            {
+                audioUrl = metadata.AudioUrl;
+                title = metadata.Title;
+                description = metadata.Description;
+                publishDate = metadata.PublishDate;
+                System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Found episode {episodeNumber} metadata in Google Drive cache");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Error checking Google Drive metadata: {ex.Message}");
+        }
+
+        // If no metadata in Google Drive or no audio URL, get from website
+        if (string.IsNullOrEmpty(audioUrl))
+        {
+            System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Fetching episode {episodeNumber} from website");
+            var episode = await _dotnetRocksService.GetEpisodeInfoAsync(episodeNumber);
+
+            title = episode.Title;
+            description = episode.Description;
+            audioUrl = episode.AudioUrl;
+            publishDate = episode.PublishDate;
+
+            // Save the fetched metadata to Google Drive for future use
+            if (!string.IsNullOrEmpty(audioUrl))
+            {
+                try
+                {
+                    await SaveSingleEpisodeMetadataToGoogleDriveAsync(episodeNumber, episode);
+                    System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Saved episode {episodeNumber} metadata to Google Drive cache");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[DownloadSingleEpisode] Failed to save metadata to Google Drive: {ex.Message}");
+                }
+            }
+        }
 
         if (string.IsNullOrEmpty(audioUrl))
         {

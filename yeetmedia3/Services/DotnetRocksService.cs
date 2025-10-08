@@ -29,7 +29,7 @@ public class DotnetRocksService
 
     private async Task<string> GetCachedRssFeedAsync()
     {
-        var cacheDir = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks");
+        var cacheDir = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks");
         Directory.CreateDirectory(cacheDir);
         var cacheFile = Path.Combine(cacheDir, "rss_feed.xml");
         var cacheMetaFile = Path.Combine(cacheDir, "rss_feed.meta");
@@ -265,7 +265,7 @@ public class DotnetRocksService
 
             // Create filename
             var fileName = $"dotnetrocks_{episodeNumber:D4}.mp3";
-            var downloadPath = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks", "podcasts");
+            var downloadPath = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks", "podcasts");
             Directory.CreateDirectory(downloadPath);
 
             var filePath = Path.Combine(downloadPath, fileName);
@@ -313,7 +313,7 @@ public class DotnetRocksService
     public string? GetCachedEpisodePath(int episodeNumber)
     {
         var fileName = $"dotnetrocks_{episodeNumber:D4}.mp3";
-        var downloadPath = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks", "podcasts");
+        var downloadPath = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks", "podcasts");
         var filePath = Path.Combine(downloadPath, fileName);
 
         return File.Exists(filePath) ? filePath : null;
@@ -330,7 +330,7 @@ public class DotnetRocksService
 
     public void ClearCache()
     {
-        var cacheDir = Path.Combine(FileSystem.CacheDirectory, "dotnetrocks");
+        var cacheDir = Path.Combine(FileSystem.AppDataDirectory, "dotnetrocks");
 
         // Clear podcasts
         var podcastPath = Path.Combine(cacheDir, "podcasts");
