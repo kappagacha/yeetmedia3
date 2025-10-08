@@ -544,7 +544,6 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                     _mediaElement.Source = MediaSource.FromFile(filePath);
 
                     // Set metadata for media notification (Android)
-                    _mediaElement.MetadataTitle = $"Episode {EpisodeNumber}";
                     _mediaElement.MetadataArtist = ".NET Rocks! Podcast";
 
                     StatusMessage = $"Episode {EpisodeNumber} loaded in player";
@@ -696,6 +695,15 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         var cachedPath = _dotnetRocksService.GetCachedEpisodePath(EpisodeNumber);
         IsEpisodeCached = !string.IsNullOrEmpty(cachedPath);
         System.Diagnostics.Debug.WriteLine($"[CheckIfCached] Episode {EpisodeNumber} cached: {IsEpisodeCached}");
+
+        // Update metadata title whenever episode changes
+        if (_mediaElement != null)
+        {
+            var title = !string.IsNullOrEmpty(EpisodeTitle)
+                ? $"Episode {EpisodeNumber}: {EpisodeTitle}"
+                : $"Episode {EpisodeNumber}";
+            _mediaElement.MetadataTitle = title;
+        }
 
         if (IsEpisodeCached)
         {
