@@ -20,7 +20,7 @@
 
         <!-- Episode Input and Action Buttons Row -->
         <Grid Grid.Row="1"
-              ColumnDefinitions="Auto,*,Auto,Auto"
+              ColumnDefinitions="Auto,*,Auto,Auto,Auto"
               ColumnSpacing="5"
               Margin="0,0,0,10">
 
@@ -57,8 +57,20 @@
                     BackgroundColor="{AppThemeBinding Light=#E0E0E0, Dark=#404040}"
                     TextColor="{AppThemeBinding Light=#333333, Dark=#FFFFFF}"/>
 
-            <!-- Actions Button -->
+            <!-- Load Playback Button -->
             <Button Grid.Column="3"
+                    Text="↻"
+                    Command="{Binding LoadPlaybackStateCommand}"
+                    BackgroundColor="{AppThemeBinding Light=#007BFF, Dark=#0056B3}"
+                    TextColor="White"
+                    WidthRequest="44"
+                    HeightRequest="44"
+                    CornerRadius="22"
+                    FontSize="20"
+                    ToolTipProperties.Text="Load Playback State"/>
+
+            <!-- Actions Button -->
+            <Button Grid.Column="4"
                     Text="⋮"
                     Command="{Binding ShowActionsCommand}"
                     BackgroundColor="{AppThemeBinding Light=#6C757D, Dark=#5A6268}"

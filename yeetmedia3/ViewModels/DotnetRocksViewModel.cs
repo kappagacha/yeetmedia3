@@ -72,6 +72,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         PlayEpisodeCommand = new Command(async () => await PlayEpisodeAsync(), () => !IsBusy && !IsEpisodeCached);
         StartSleepTimerCommand = new Command(StartSleepTimer, () => !IsSleepTimerRunning && SleepTimerMinutes > 0);
         StopSleepTimerCommand = new Command(StopSleepTimer, () => IsSleepTimerRunning);
+        LoadPlaybackStateCommand = new Command(async () => await LoadPlaybackStateAsync());
 
         // Set default episode number
         EpisodeNumber = 1001; // Default episode
@@ -250,6 +251,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     public ICommand PlayEpisodeCommand { get; }
     public ICommand StartSleepTimerCommand { get; }
     public ICommand StopSleepTimerCommand { get; }
+    public ICommand LoadPlaybackStateCommand { get; }
 
 
     private async Task DownloadEpisodeAsync()
@@ -1638,7 +1640,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
-    private async Task LoadPlaybackStateAsync()
+    public async Task LoadPlaybackStateAsync()
     {
         PlaybackState? state = null;
         string? json = null;
