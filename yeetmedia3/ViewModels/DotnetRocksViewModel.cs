@@ -1640,6 +1640,47 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
         }
     }
 
+    public async Task CheckAndReloadEpisodeAsync()
+    {
+        System.Diagnostics.Debug.WriteLine($"[CheckAndReload] START - Episode: {EpisodeNumber}");
+
+        // Check if MediaElement is initialized
+        if (_mediaElement == null)
+        {
+            System.Diagnostics.Debug.WriteLine($"[CheckAndReload] MediaElement is null, skipping");
+            return;
+        }
+
+        // Check if we have saved state
+        if (_lastSavedState == null)
+        {
+            System.Diagnostics.Debug.WriteLine($"[CheckAndReload] No saved state, skipping");
+            return;
+        }
+
+        var savedPosition = _lastSavedState.Position;
+
+        System.Diagnostics.Debug.WriteLine($"[CheckAndReload] Saved: Episode {_lastSavedState.EpisodeNumber} at {FormatTime(savedPosition)}");
+
+        // Check if episode is cached
+        if (IsEpisodeCached)
+        {
+            // Set restoration flag if position > 0
+            if (savedPosition > 0)
+            {
+                _isRestoringPosition = true;
+                System.Diagnostics.Debug.WriteLine($"[CheckAndReload] Setting restoration flag for position {FormatTime(savedPosition)}");
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[CheckAndReload] Episode is cached, calling LoadEpisode()");
+            await LoadEpisode();
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[CheckAndReload] Episode is not cached");
+        }
+    }
+
     public async Task LoadPlaybackStateAsync()
     {
         PlaybackState? state = null;

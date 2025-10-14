@@ -5,7 +5,8 @@
       "Bash(mkdir:*)",
       "Bash(dotnet build:*)",
       "Bash(dotnet msbuild:*)",
-      "Bash(dotnet:*)"
+      "Bash(dotnet:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

@@ -25,21 +25,28 @@ public partial class DotnetRocksView : ContentPage
         await _viewModel.SaveStateOnBackgroundAsync();
     }
 
-    protected override void OnAppearing()
+    protected override async void OnAppearing()
     {
         base.OnAppearing();
-        System.Diagnostics.Debug.WriteLine($"[DotnetRocksView] OnAppearing - View is appearing, IsInitialized: {_isInitialized}");
+        System.Diagnostics.Debug.WriteLine($"[DotnetRocksView] OnAppearing - View is appearing");
 
-        // Only initialize MediaElement once
-        if (!_isInitialized && MediaPlayer != null)
+        if (MediaPlayer != null)
         {
-            System.Diagnostics.Debug.WriteLine($"[DotnetRocksView] Initializing MediaElement");
-            _viewModel.SetMediaElement(MediaPlayer);
-            _isInitialized = true;
+            // Only initialize MediaElement once (subscribe to events)
+            if (!_isInitialized)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DotnetRocksView] Initializing MediaElement");
+                _viewModel.SetMediaElement(MediaPlayer);
+                _isInitialized = true;
+            }
+
+            // Always check if episode needs to be loaded/restored when view appears
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksView] Checking if episode needs to be loaded/restored");
+            await _viewModel.CheckAndReloadEpisodeAsync();
         }
         else
         {
-            System.Diagnostics.Debug.WriteLine($"[DotnetRocksView] Skipping MediaElement initialization - Already initialized or MediaPlayer is null");
+            System.Diagnostics.Debug.WriteLine($"[DotnetRocksView] MediaPlayer is null");
         }
     }
 }
