@@ -49,11 +49,21 @@ public class GoogleAuthService
 #else
         try
         {
+            // Clear any existing expired tokens first
+            var existingToken = await GetSavedTokenAsync();
+            if (existingToken != null && string.IsNullOrEmpty(existingToken.RefreshToken))
+            {
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Clearing old token without refresh token");
+                SecureStorage.Default.Remove("google_auth_token");
+            }
+
             // Generate random state for security
             var state = Guid.NewGuid().ToString("N");
 
             // Build the authorization URL
             var authUrl = BuildAuthorizationUrl(state);
+
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Starting OAuth flow with URL: {authUrl}");
 
             // Use MAUI's WebAuthenticator for the OAuth flow
             var authResult = await WebAuthenticator.Default.AuthenticateAsync(
@@ -64,9 +74,15 @@ public class GoogleAuthService
             if (authResult?.Properties?.ContainsKey("code") == true)
             {
                 var code = authResult.Properties["code"];
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Got authorization code, exchanging for tokens");
 
                 // Exchange the authorization code for tokens
-                return await ExchangeCodeForTokenAsync(code);
+                var token = await ExchangeCodeForTokenAsync(code);
+
+                // Log whether we got a refresh token
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] OAuth complete - Has Refresh Token: {!string.IsNullOrEmpty(token.RefreshToken)}");
+
+                return token;
             }
 
             throw new Exception("No authorization code received");
@@ -96,6 +112,8 @@ public class GoogleAuthService
 
             var dataStore = new FileDataStore(Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store"));
 
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Windows - Starting GoogleWebAuthorizationBroker");
+
             var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
                 clientSecrets,
                 _scopes,
@@ -106,10 +124,17 @@ public class GoogleAuthService
             // Get the access token from the credential
             var token = await credential.GetAccessTokenForRequestAsync();
 
+            // Get the refresh token - it's stored in the TokenResponse
+            var refreshToken = credential.Token.RefreshToken;
+
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Windows - Got access token");
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Windows - Has refresh token: {!string.IsNullOrEmpty(refreshToken)}");
+
             // Create GoogleAuthToken to match our interface
             var authToken = new GoogleAuthToken
             {
                 AccessToken = token,
+                RefreshToken = refreshToken ?? string.Empty,
                 TokenType = "Bearer",
                 ExpiresAt = DateTime.UtcNow.AddHours(1), // Google tokens typically expire in 1 hour
                 Scope = string.Join(" ", _scopes)
@@ -195,6 +220,14 @@ public class GoogleAuthService
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync();
+
+            // If refresh token is invalid/expired, clear the stored token
+            if (error.Contains("invalid_grant") || error.Contains("expired") || error.Contains("revoked"))
+            {
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Refresh token is invalid/expired, clearing stored credentials");
+                SecureStorage.Default.Remove("google_auth_token");
+            }
+
             throw new Exception($"Token refresh failed: {error}");
         }
 
@@ -287,6 +320,11 @@ public class GoogleAuthService
 
         var json = JsonSerializer.Serialize(token);
         await SecureStorage.Default.SetAsync("google_auth_token", json);
+
+        System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token saved:");
+        System.Diagnostics.Debug.WriteLine($"  Has Access Token: {!string.IsNullOrEmpty(token.AccessToken)}");
+        System.Diagnostics.Debug.WriteLine($"  Has Refresh Token: {!string.IsNullOrEmpty(token.RefreshToken)}");
+        System.Diagnostics.Debug.WriteLine($"  Expires At: {token.ExpiresAt}");
     }
 
     private async Task<GoogleAuthToken?> GetSavedTokenAsync()
@@ -295,15 +333,29 @@ public class GoogleAuthService
         {
             var json = await SecureStorage.Default.GetAsync("google_auth_token");
             if (string.IsNullOrEmpty(json))
+            {
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] No token found in SecureStorage");
                 return null;
+            }
 
-            return JsonSerializer.Deserialize<GoogleAuthToken>(json, new JsonSerializerOptions
+            var token = JsonSerializer.Deserialize<GoogleAuthToken>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
+
+            if (token != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Token loaded from storage:");
+                System.Diagnostics.Debug.WriteLine($"  Has Access Token: {!string.IsNullOrEmpty(token.AccessToken)}");
+                System.Diagnostics.Debug.WriteLine($"  Has Refresh Token: {!string.IsNullOrEmpty(token.RefreshToken)}");
+                System.Diagnostics.Debug.WriteLine($"  Expires At: {token.ExpiresAt}");
+            }
+
+            return token;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] Error loading token: {ex.Message}");
             return null;
         }
     }
@@ -311,24 +363,31 @@ public class GoogleAuthService
     public async Task SignOutAsync()
     {
 #if WINDOWS
-        // Clear Windows credential store
+        // Clear Windows credential store (FileDataStore)
         var tokenPath = Path.Combine(FileSystem.AppDataDirectory, "DriveAPI.Auth.Store");
         if (Directory.Exists(tokenPath))
         {
             try
             {
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] SignOut - Deleting FileDataStore at: {tokenPath}");
                 Directory.Delete(tokenPath, true);
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] SignOut - FileDataStore deleted successfully");
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore errors when deleting
+                System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] SignOut - Error deleting FileDataStore: {ex.Message}");
             }
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] SignOut - FileDataStore not found at: {tokenPath}");
         }
 
         // Also clear SecureStorage in case there's any cached data
         try
         {
             SecureStorage.Default.Remove("google_auth_token");
+            System.Diagnostics.Debug.WriteLine($"[GoogleAuthService] SignOut - Cleared SecureStorage");
         }
         catch
         {
