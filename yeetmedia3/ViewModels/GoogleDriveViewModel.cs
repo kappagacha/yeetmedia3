@@ -10,6 +10,7 @@ namespace Yeetmedia3.ViewModels;
 public class GoogleDriveViewModel : INotifyPropertyChanged
 {
     private readonly GoogleDriveService _googleDriveService;
+    private readonly LoggingService _loggingService;
     private bool _isLoading;
     private bool _isAuthenticated;
     private string _errorMessage = string.Empty;
@@ -19,9 +20,10 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
     private string _currentFolderName = "My Drive";
     private Stack<(string Id, string Name)> _navigationStack = new Stack<(string, string)>();
 
-    public GoogleDriveViewModel()
+    public GoogleDriveViewModel(GoogleDriveService googleDriveService, LoggingService loggingService)
     {
-        _googleDriveService = new GoogleDriveService();
+        _googleDriveService = googleDriveService;
+        _loggingService = loggingService;
         Files = new ObservableCollection<DriveFile>();
 
         // Initialize commands
@@ -34,6 +36,8 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         OpenItemCommand = new Command<DriveFile>(async (file) => await OpenItemAsync(file), (file) => IsAuthenticated && file != null);
         GoBackCommand = new Command(async () => await GoBackAsync(), () => CanGoBack);
         SignOutCommand = new Command(async () => await SignOutAsync(), () => IsAuthenticated);
+        DeleteFileCommand = new Command<DriveFile>(async (file) => await DeleteFileAsync(file), (file) => IsAuthenticated && file != null);
+        CopyFileContentsCommand = new Command<DriveFile>(async (file) => await CopyFileContentsAsync(file), (file) => CanCopyFileContents(file));
 
         // Initialize JSON commands
         NewJsonFileCommand = new Command(async () => await NewJsonFileAsync());
@@ -120,6 +124,8 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
     public ICommand GoBackCommand { get; }
     public ICommand NewJsonFileCommand { get; }
     public ICommand EditJsonFileCommand { get; }
+    public ICommand DeleteFileCommand { get; }
+    public ICommand CopyFileContentsCommand { get; }
 
     private async Task AuthenticateAsync()
     {
@@ -323,9 +329,21 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
             // Update GoBack command state
             ((Command)GoBackCommand).ChangeCanExecute();
         }
+        // Check if it's a JSON file - open in read-only mode
+        else if (file.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            var navigationParameter = new Dictionary<string, object>
+            {
+                { "currentFolderId", _currentFolderId },
+                { "fileToEdit", file },
+                { "isNewFile", false },
+                { "isReadOnly", true }
+            };
+            await Shell.Current.GoToAsync(nameof(Views.JsonEditorView), navigationParameter);
+        }
         else
         {
-            // For files, you could implement preview or download
+            // For other files, download them
             await DownloadFileAsync(file);
         }
     }
@@ -383,9 +401,111 @@ public class GoogleDriveViewModel : INotifyPropertyChanged
         {
             { "currentFolderId", _currentFolderId },
             { "fileToEdit", file },
-            { "isNewFile", false }
+            { "isNewFile", false },
+            { "isReadOnly", false }
         };
         await Shell.Current.GoToAsync(nameof(Views.JsonEditorView), navigationParameter);
+    }
+
+    private bool CanCopyFileContents(DriveFile? file)
+    {
+        if (file == null) return false;
+
+        // Only allow copying contents for JSON and TXT files
+        var fileName = file.Name.ToLower();
+        return fileName.EndsWith(".json") || fileName.EndsWith(".txt");
+    }
+
+    private async Task DeleteFileAsync(DriveFile file)
+    {
+        if (file == null) return;
+
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = string.Empty;
+
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                var confirmed = await window.Page.DisplayAlert(
+                    "Confirm Delete",
+                    $"Are you sure you want to delete '{file.Name}'?",
+                    "Delete",
+                    "Cancel");
+
+                if (!confirmed)
+                {
+                    return;
+                }
+            }
+
+            await _googleDriveService.DeleteFileAsync(file.Id);
+            _loggingService.Info("GoogleDrive", $"File deleted: {file.Name}");
+
+            // Refresh the file list
+            await RefreshFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            _loggingService.Error("GoogleDrive", $"Failed to delete file: {file.Name}", ex);
+            ErrorMessage = $"Delete failed: {ex.Message}";
+
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Error", $"Failed to delete file:\n{ex.Message}", "OK");
+            }
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task CopyFileContentsAsync(DriveFile file)
+    {
+        if (file == null) return;
+
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = string.Empty;
+
+            // Download file content
+            using var stream = await _googleDriveService.DownloadFileAsync(file.Id);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+
+            // Add filename as first line
+            var clipboardContent = $"File: {file.Name}\n{content}";
+
+            // Copy to clipboard
+            await Clipboard.Default.SetTextAsync(clipboardContent);
+
+            _loggingService.Info("GoogleDrive", $"Copied contents to clipboard: {file.Name}");
+
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Success", $"Copied contents of '{file.Name}' to clipboard.", "OK");
+            }
+        }
+        catch (Exception ex)
+        {
+            _loggingService.Error("GoogleDrive", $"Failed to copy file contents: {file.Name}", ex);
+            ErrorMessage = $"Copy failed: {ex.Message}";
+
+            var window = Application.Current?.Windows.FirstOrDefault();
+            if (window?.Page != null)
+            {
+                await window.Page.DisplayAlert("Error", $"Failed to copy file contents:\n{ex.Message}", "OK");
+            }
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private async Task TryAutoSignInAsync()

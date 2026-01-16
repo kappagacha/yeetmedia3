@@ -115,4 +115,52 @@ public class LoggingService
             }
         });
     }
+
+    /// <summary>
+    /// Exports all logs from the database to a JSON stream
+    /// </summary>
+    public async Task<Stream> ExportLogsAsync()
+    {
+        try
+        {
+            // Get all logs from database
+            var allLogs = await _database.Table<LogEntry>()
+                .OrderBy(l => l.Timestamp)
+                .ToListAsync();
+
+            // Create export data
+            var exportData = new
+            {
+                ExportDate = DateTime.Now.ToString("o"),
+                TotalEntries = allLogs.Count,
+                Application = "Yeetmedia3",
+                Platform = DeviceInfo.Current.Platform.ToString(),
+                Model = DeviceInfo.Current.Model,
+                Version = AppInfo.Current.VersionString,
+                Logs = allLogs.Select(log => new
+                {
+                    Timestamp = log.Timestamp.ToString("o"),
+                    Level = log.Level.ToString(),
+                    Category = log.Category,
+                    Message = log.Message,
+                    Exception = log.Exception
+                })
+            };
+
+            // Serialize to JSON
+            var json = System.Text.Json.JsonSerializer.Serialize(exportData, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            // Convert to stream
+            var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+            return stream;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[LoggingService] Failed to export logs: {ex.Message}");
+            throw;
+        }
+    }
 }

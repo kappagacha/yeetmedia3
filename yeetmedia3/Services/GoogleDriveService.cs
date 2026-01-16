@@ -269,6 +269,21 @@ namespace Yeetmedia3.Services;
             return folder.Id;
         }
 
+        public async Task DeleteFileAsync(string fileId)
+        {
+            if (_driveService == null)
+            {
+                await InitializeAsync();
+            }
+
+            if (_driveService == null)
+            {
+                throw new InvalidOperationException("Drive service is not initialized");
+            }
+
+            await _driveService.Files.Delete(fileId).ExecuteAsync();
+        }
+
         public async Task<string> UploadFileAsync(string fileName, Stream fileContent, string mimeType, string? parentFolderId = null)
         {
             return await UploadFileAsync(fileName, fileContent, mimeType, parentFolderId, null);

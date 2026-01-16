@@ -9,13 +9,20 @@
 
     <Grid RowDefinitions="Auto,*" Padding="10">
 
-        <!-- Header with Clear button -->
+        <!-- Header with Clear and Export buttons -->
         <HorizontalStackLayout Grid.Row="0" Spacing="10" Margin="0,0,0,10">
             <Label Text="Application Logs"
                    FontSize="20"
                    FontAttributes="Bold"
                    VerticalOptions="Center"
                    HorizontalOptions="Start"/>
+
+            <Button Text="Export to Drive"
+                    Command="{Binding ExportLogsCommand}"
+                    BackgroundColor="#4285F4"
+                    TextColor="White"
+                    IsEnabled="{Binding IsExporting, Converter={StaticResource InverseBoolConverter}}"
+                    HorizontalOptions="End"/>
 
             <Button Text="Clear Logs"
                     Command="{Binding ClearLogsCommand}"

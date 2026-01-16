@@ -33,7 +33,7 @@
 
         <!-- Navigation Bar -->
         <Grid Grid.Row="1"
-              ColumnDefinitions="Auto,*,Auto,Auto,Auto"
+              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto"
               ColumnSpacing="5"
               Margin="0,10"
               IsVisible="{Binding IsAuthenticated}">
@@ -69,6 +69,22 @@
                     Padding="10,5"/>
 
             <Button Grid.Column="4"
+                    Text="Copy"
+                    Command="{Binding CopyFileContentsCommand}"
+                    CommandParameter="{Binding SelectedFile}"
+                    BackgroundColor="#17A2B8"
+                    TextColor="White"
+                    Padding="10,5"/>
+
+            <Button Grid.Column="5"
+                    Text="Delete"
+                    Command="{Binding DeleteFileCommand}"
+                    CommandParameter="{Binding SelectedFile}"
+                    BackgroundColor="#DC3545"
+                    TextColor="White"
+                    Padding="10,5"/>
+
+            <Button Grid.Column="6"
                     Text="Refresh"
                     Command="{Binding RefreshFilesCommand}"
                     BackgroundColor="#28A745"

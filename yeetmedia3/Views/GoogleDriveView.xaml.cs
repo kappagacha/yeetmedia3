@@ -67,10 +67,10 @@ public partial class GoogleDriveView : ContentPage
         {
             System.Diagnostics.Debug.WriteLine($"[GoogleDriveView] Item double-tapped: {file.Name} (Type: {file.MimeType})");
 
-            // Execute the OpenItemCommand with the file
+            // Execute the OpenItemCommand with the file on the main thread
             if (_viewModel.OpenItemCommand.CanExecute(file))
             {
-                await Task.Run(() => _viewModel.OpenItemCommand.Execute(file));
+                _viewModel.OpenItemCommand.Execute(file);
             }
         }
     }

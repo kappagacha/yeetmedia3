@@ -17,16 +17,17 @@ public class JsonEditorViewModel : INotifyPropertyChanged
     private string _statusColor = "Gray";
     private string _currentFileId = string.Empty;
     private string _currentFolderId = string.Empty;
+    private bool _isReadOnly;
 
     public JsonEditorViewModel(GoogleDriveService googleDriveService)
     {
         _googleDriveService = googleDriveService;
 
         // Initialize commands
-        ValidateJsonCommand = new Command(ValidateJson);
-        FormatJsonCommand = new Command(FormatJson);
-        SaveToDriveCommand = new Command(async () => await SaveToDriveAsync());
-        NewFileCommand = new Command(CreateNewFile);
+        ValidateJsonCommand = new Command(ValidateJson, () => !IsReadOnly);
+        FormatJsonCommand = new Command(FormatJson, () => !IsReadOnly);
+        SaveToDriveCommand = new Command(async () => await SaveToDriveAsync(), () => !IsReadOnly);
+        NewFileCommand = new Command(CreateNewFile, () => !IsReadOnly);
     }
 
     public string FileName
@@ -73,6 +74,21 @@ public class JsonEditorViewModel : INotifyPropertyChanged
 
     public int LineCount => string.IsNullOrEmpty(JsonContent) ? 0 : JsonContent.Split('\n').Length;
     public int CharCount => string.IsNullOrEmpty(JsonContent) ? 0 : JsonContent.Length;
+
+    public bool IsReadOnly
+    {
+        get => _isReadOnly;
+        set
+        {
+            _isReadOnly = value;
+            OnPropertyChanged();
+            // Update command executability
+            ((Command)ValidateJsonCommand).ChangeCanExecute();
+            ((Command)FormatJsonCommand).ChangeCanExecute();
+            ((Command)SaveToDriveCommand).ChangeCanExecute();
+            ((Command)NewFileCommand).ChangeCanExecute();
+        }
+    }
 
     public ICommand ValidateJsonCommand { get; }
     public ICommand FormatJsonCommand { get; }
@@ -205,7 +221,7 @@ public class JsonEditorViewModel : INotifyPropertyChanged
         StatusColor = "Gray";
     }
 
-    public async Task LoadFileAsync(DriveFile file)
+    public async Task LoadFileAsync(DriveFile file, bool readOnly = false)
     {
         try
         {
@@ -214,6 +230,7 @@ public class JsonEditorViewModel : INotifyPropertyChanged
 
             FileName = file.Name;
             _currentFileId = file.Id;
+            IsReadOnly = readOnly;
 
             // Download file content
             using var stream = await _googleDriveService.DownloadFileAsync(file.Id);
@@ -223,8 +240,8 @@ public class JsonEditorViewModel : INotifyPropertyChanged
             // Format it for better readability
             FormatJson();
 
-            StatusMessage = "File loaded successfully ✓";
-            StatusColor = "Green";
+            StatusMessage = readOnly ? "File opened in read-only mode" : "File loaded successfully ✓";
+            StatusColor = readOnly ? "Orange" : "Green";
         }
         catch (Exception ex)
         {

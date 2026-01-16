@@ -581,6 +581,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                     _mediaElement.Source = MediaSource.FromFile(filePath);
 
                     // Set metadata for media notification (Android)
+                    _mediaElement.MetadataTitle = !string.IsNullOrEmpty(_episodeTitle) ? _episodeTitle : $"Episode {EpisodeNumber}";
                     _mediaElement.MetadataArtist = ".NET Rocks! Podcast";
 
                     StatusMessage = $"Episode {EpisodeNumber} loaded in player";
@@ -1685,6 +1686,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
     {
         PlaybackState? state = null;
         string? json = null;
+        string stateSource = "none"; // Track where the state came from
 
         try
         {
@@ -1727,6 +1729,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                         using var stream = await _googleDriveService.DownloadFileAsync(stateFile.Id);
                         using var reader = new StreamReader(stream);
                         json = await reader.ReadToEndAsync();
+                        stateSource = "Google Drive";
                         System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Successfully downloaded from Google Drive");
                     }
                     else
@@ -1756,8 +1759,8 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                 if (File.Exists(localPath))
                 {
                     System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Loading from local file");
-                    _loggingService.Info("PlaybackState", "Loading from local backup file");
                     json = await File.ReadAllTextAsync(localPath);
+                    stateSource = "Local Storage";
                 }
                 else
                 {
@@ -1779,6 +1782,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             }
 
             System.Diagnostics.Debug.WriteLine($"[DotnetRocksViewModel] Loaded state: Episode {state.EpisodeNumber}, Position: {state.PositionFormatted}, LastUpdated: {state.LastUpdated}, Device: {state.DeviceName}");
+            _loggingService.Info("PlaybackState", $"Loaded from {stateSource}: Episode {state.EpisodeNumber}, Position: {state.PositionFormatted}, Device: {state.DeviceName}");
 
             _lastSavedState = state;
 
@@ -1790,6 +1794,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             if (state.Position <= 0)
             {
                 StatusMessage = $"Loaded episode {state.EpisodeNumber}";
+                _loggingService.Info("PlaybackState", $"Episode {state.EpisodeNumber} restored from {stateSource} (position 0:00)");
                 System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Episode {state.EpisodeNumber} at position {state.PositionFormatted}");
                 return;
             }
@@ -1797,6 +1802,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
             // Restore position since it's greater than 0
             _isRestoringPosition = true;
             StatusMessage = $"Found previous playback at {FormatTime(state.Position)}";
+            _loggingService.Info("PlaybackState", $"Episode {state.EpisodeNumber} restored from {stateSource} at position {state.PositionFormatted}");
             System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Will restore to {FormatTime(state.Position)} when episode loads");
 
             // If episode is already loaded, restore position now
@@ -1809,6 +1815,7 @@ public class DotnetRocksViewModel : INotifyPropertyChanged
                     var position = TimeSpan.FromSeconds(state.Position);
                     await _mediaElement.SeekTo(position);
                     System.Diagnostics.Debug.WriteLine($"[LoadPlaybackState] Position restored to {FormatTime(state.Position)}");
+                    _loggingService.Info("PlaybackState", $"Position restored to {state.PositionFormatted} from {stateSource}");
 
                     if (state.IsPlaying)
                     {

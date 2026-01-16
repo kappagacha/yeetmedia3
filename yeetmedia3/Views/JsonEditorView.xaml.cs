@@ -7,6 +7,7 @@ namespace Yeetmedia3.Views;
 [QueryProperty(nameof(CurrentFolderId), "currentFolderId")]
 [QueryProperty(nameof(FileToEdit), "fileToEdit")]
 [QueryProperty(nameof(IsNewFile), "isNewFile")]
+[QueryProperty(nameof(IsReadOnly), "isReadOnly")]
 public partial class JsonEditorView : ContentPage
 {
     private JsonEditorViewModel _viewModel;
@@ -23,6 +24,7 @@ public partial class JsonEditorView : ContentPage
     public string CurrentFolderId { get; set; } = string.Empty;
     public DriveFile? FileToEdit { get; set; }
     public bool IsNewFile { get; set; }
+    public bool IsReadOnly { get; set; }
 
     protected override async void OnNavigatedTo(NavigatedToEventArgs args)
     {
@@ -35,7 +37,7 @@ public partial class JsonEditorView : ContentPage
 
         if (!IsNewFile && FileToEdit != null)
         {
-            await _viewModel.LoadFileAsync(FileToEdit);
+            await _viewModel.LoadFileAsync(FileToEdit, IsReadOnly);
         }
     }
 }
